@@ -1,0 +1,36 @@
+name: moose-api
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  moose-api:
+    volumes:
+      - ./data/moose-user:/app/src/moose/data/user
+      - ./data/user_vocabularies.json:/app/src/moose/data/user_vocabularies.json
+    networks:
+      - default
+      - proxy
+    logging: *logging
+
+  moose-demo:
+    networks:
+      - default
+      - proxy
+    logging: *logging
+
+  mongo:
+    volumes:
+      - moose-mongo-data:/data/db
+    logging: *logging
+
+volumes:
+  moose-mongo-data:
+
+networks:
+  proxy:
+    name: ${MOOSE_PROXY_NETWORK:-moose-proxy}
+    external: true

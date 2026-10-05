@@ -1,46 +1,43 @@
 services:
   moose-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     ports:
-      - "${MOOSE_API_PORT:-8000}:${MOOSE_API_PORT:-8000}"
+      - "${MOOSE_BIND_ADDRESS:-127.0.0.1}:${MOOSE_API_PORT:-8000}:8000"
     env_file:
-      - .env
+      - ${MOOSE_ENV_FILE:-.env}
     environment:
-      - MOOSE_MONGO_URL=${MOOSE_MONGO_URL:-mongodb://mongo}
-      - MOOSE_OPENROUTER_BASE_URL=${MOOSE_OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      MOOSE_API_PORT: "8000"
+      MOOSE_MONGO_URL: mongodb://mongo:27017
     command:
-      [
-        "uvicorn",
-        "moose_api.main:app",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "${MOOSE_API_PORT:-8000}",
-        "--workers",
-        "${MOOSE_WEB_CONCURRENCY:-4}",
-        "--proxy-headers",
-        "--forwarded-allow-ips",
-        "*"
-      ]
+      - uvicorn
+      - moose_api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "${MOOSE_WEB_CONCURRENCY:-4}"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "*"
     depends_on:
       mongo:
         condition: service_healthy
-    volumes:
-      - ./examples/schema_ingest_samples:/app/examples/schema_ingest_samples:ro
     restart: unless-stopped
     healthcheck:
       test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import os,urllib.request; req=urllib.request.Request('http://localhost:${MOOSE_API_PORT:-8000}/health', headers={'X-API-Key': os.environ.get('MOOSE_API_KEY','')}); urllib.request.urlopen(req, timeout=2).read()",
-        ]
+        - CMD
+        - python
+        - -c
+        - >-
+          import os,urllib.request;
+          req=urllib.request.Request('http://localhost:8000/health',
+          headers={'X-API-Key': os.environ.get('MOOSE_API_KEY','')});
+          urllib.request.urlopen(req, timeout=2).read()
       interval: 10s
       timeout: 3s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
   mongo:
     image: mongo:7
@@ -48,32 +45,31 @@ services:
       - ./data/mongo:/data/db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
-      timeout: 3s
-      retries: 5
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   moose-demo:
     build:
       context: .
       dockerfile: Dockerfile.demo
     ports:
-      - "${MOOSE_DEMO_PORT:-8501}:${MOOSE_DEMO_PORT:-8501}"
-    env_file:
-      - .env
+      - "${MOOSE_BIND_ADDRESS:-127.0.0.1}:${MOOSE_DEMO_PORT:-8501}:8501"
     environment:
-      - MOOSE_API_BASE_URL=http://moose-api:${MOOSE_API_PORT:-8000}
-    command:
-      [
-        "streamlit",
-        "run",
-        "examples/streamlit_app.py",
-        "--server.address",
-        "0.0.0.0",
-        "--server.port",
-        "${MOOSE_DEMO_PORT:-8501}"
-      ]
+      MOOSE_API_BASE_URL: http://moose-api:8000
     depends_on:
       moose-api:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s

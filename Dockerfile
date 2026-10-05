@@ -6,7 +6,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY examples/schema_ingest_samples ./examples/schema_ingest_samples
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -e .
 
 EXPOSE 8000
 

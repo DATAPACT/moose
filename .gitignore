@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv
 __pycache__/
 *.pyc
@@ -6,3 +8,5 @@ __pycache__/
 .vscode/
 .DS_Store
 data/mongo/
+data/moose-user/
+data/user_vocabularies.json

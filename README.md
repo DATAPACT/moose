@@ -21,12 +21,56 @@ Use this README as a quick usage guide. For deep technical details, see the docs
 ### Option A: Docker (recommended)
 
 ```bash
+cp .env.example .env
+# Set MOOSE_API_KEY in .env before starting.
 docker compose up -d --build
 ```
 
 Default local endpoints:
 - API: `http://localhost:8000`
 - Frontend (Streamlit): `http://localhost:8501`
+
+### Production deployment
+
+Use `docker-compose.yml` with `docker-compose.prod.yml` for the API, MongoDB,
+and Streamlit. The override adds persistent MongoDB and user schema storage,
+bounded logs, and a shared proxy network. Both application ports bind to
+loopback by default; MongoDB has no published port.
+
+```bash
+cp .env.example .env
+# Set MOOSE_API_KEY and MOOSE_PROXY_NETWORK in .env.
+docker network create moose-proxy  # Only if this proxy network does not exist.
+./scripts/deploy.sh
+```
+
+The deployment script prepares the user schema bind mounts and waits for all
+three services to become healthy. The equivalent Compose command, after
+preparing those mounts, is:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait
+```
+
+Attach your existing reverse proxy or tunnel to `MOOSE_PROXY_NETWORK` and route
+the API to `http://moose-api:8000` and Streamlit to `http://moose-demo:8501`.
+The proxy must support WebSockets for Streamlit. Users enter their Moose API
+key and LLM provider key in the Streamlit sidebar.
+
+For an existing deployment, keep the same Compose project name and MongoDB
+volume. The production default project name is `moose-api`, retaining the
+existing `moose-api_moose-mongo-data` volume. Set `COMPOSE_PROJECT_NAME` if your
+deployment uses a different project name. Preserve `data/moose-user/` and
+`data/user_vocabularies.json` when updating the checkout.
+
+An existing `.env.moose` can be reused with
+`MOOSE_ENV_FILE=.env.moose ./scripts/deploy.sh`. Set `MOOSE_PROXY_NETWORK=cloudflare`
+in that file when reusing the existing Cloudflare network. The tunnel remains
+managed separately as VM infrastructure; Moose needs no Cloudflare-specific
+Compose file.
+
+After pulling updates on the VM, rerun `./scripts/deploy.sh`. Check the services
+with `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps`.
 
 ### Option B: Local API only
 
