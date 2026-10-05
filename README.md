@@ -33,7 +33,8 @@ Default local endpoints:
 ### Production deployment
 
 Use `docker-compose.yml` with `docker-compose.prod.yml` for the API, MongoDB,
-and Streamlit. The override adds persistent MongoDB and user schema storage,
+and Streamlit. MongoDB uses `./data/mongo` in both configurations. The override
+adds persistent user schema storage,
 bounded logs, and a shared proxy network. Both application ports bind to
 loopback by default; MongoDB has no published port.
 
@@ -58,13 +59,13 @@ The proxy must support WebSockets for Streamlit. Users enter their Moose API
 key and LLM provider key in the Streamlit sidebar.
 
 For an existing deployment, keep the same Compose project name and MongoDB
-volume. The production default project name is `moose-api`, retaining the
-existing `moose-api_moose-mongo-data` volume. Set `COMPOSE_PROJECT_NAME` if your
+data directory. The production default project name is `moose`, retaining the
+existing `./data/mongo` bind mount. Set `COMPOSE_PROJECT_NAME` if your
 deployment uses a different project name. Preserve `data/moose-user/` and
 `data/user_vocabularies.json` when updating the checkout.
 
 An existing `.env.moose` can be reused with
-`MOOSE_ENV_FILE=.env.moose ./scripts/deploy.sh`. Set `MOOSE_PROXY_NETWORK=cloudflare`
+`MOOSE_ENV_FILE=.env.moose ./scripts/deploy.sh`. Set `MOOSE_PROXY_NETWORK=cloudflare_default`
 in that file when reusing the existing Cloudflare network. The tunnel remains
 managed separately as VM infrastructure; Moose needs no Cloudflare-specific
 Compose file.

@@ -1,4 +1,4 @@
-name: moose-api
+name: moose
 
 x-logging: &logging
   driver: json-file
@@ -23,12 +23,7 @@ services:
     logging: *logging
 
   mongo:
-    volumes:
-      - moose-mongo-data:/data/db
     logging: *logging
-
-volumes:
-  moose-mongo-data:
 
 networks:
   proxy:
