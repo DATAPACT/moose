@@ -21,6 +21,7 @@ dependencies = [
   "aiofiles>=23.2.1",
   "ollama>=0.3.0",
   "motor>=3.3.0",
+  "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

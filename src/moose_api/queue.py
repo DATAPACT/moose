@@ -8,7 +8,7 @@ from typing import Any
 from moose.config import Settings
 from moose.cpa import run_table_cpa
 from moose.ingest import ingest_schema_payload
-from moose.llm import LLMClient, create_client, track_llm_usage
+from moose.llm import LLMClient, OpenAICompatibleClient, create_client, track_llm_usage
 from moose.ner import run_table_annotate, run_tabular_ner, run_text_ner
 from moose.privacy import run_privacy_analyze
 
@@ -159,7 +159,7 @@ class MongoJobStore(JobStore):
 
     async def fail_interrupted_partner_jobs(self) -> int:
         result = await self._jobs.update_many(
-            {"status": {"$in": ["queued", "processing"]}, "client": {"$regex": "^(team|key):"}},
+            {"status": {"$in": ["queued", "processing"]}, "client": {"$regex": "^user:"}},
             {"$set": {"status": "failed", "updated_at": utc_now(), "error": INTERRUPTED_PARTNER_JOB_ERROR}},
         )
         return int(result.modified_count)
@@ -285,19 +285,20 @@ class WorkerPool:
         self._tasks: list[asyncio.Task] = []
         self._shutdown = asyncio.Event()
         self._queue.set_shutdown_event(self._shutdown)
-        # Partner jobs with their gateway key, kept in this process's memory only.
-        self._local_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=settings.MOOSE_QUEUE_MAXSIZE)
+        # Jobs on a user's own provider key, with that key, kept in this process's memory only.
+        self._local_queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=settings.MOOSE_QUEUE_MAXSIZE)
 
     async def start(self) -> None:
-        # Partner keys lived only in the memory of the previous process, so its
-        # unfinished partner jobs can never run.
+        # User keys lived only in the memory of the previous process, so its unfinished
+        # jobs on user keys can never run.
         await self._store.fail_interrupted_partner_jobs()
         for idx in range(self._settings.MOOSE_WORKER_COUNT):
             self._tasks.append(asyncio.create_task(self._worker_loop(idx)))
             self._tasks.append(asyncio.create_task(self._local_worker_loop(idx)))
 
-    def enqueue_local(self, job_id: str, gateway_key: str) -> None:
-        self._local_queue.put_nowait((job_id, gateway_key))
+    def enqueue_local(self, job_id: str, route: Any) -> None:
+        """Queue a job on a user's own key; `route` is a vault_store.ProviderRoute."""
+        self._local_queue.put_nowait((job_id, route))
 
     def local_queue_size(self) -> int:
         return self._local_queue.qsize()
@@ -327,10 +328,11 @@ class WorkerPool:
 
     async def _local_worker_loop(self, worker_id: int) -> None:
         while not self._shutdown.is_set():
-            job_id, gateway_key = await self._local_queue.get()
-            await self._process_job(job_id, gateway_key)
+            job_id, route = await self._local_queue.get()
+            await self._process_job(job_id, route)
+            del route
 
-    async def _process_job(self, job_id: str, gateway_key: str | None = None) -> None:
+    async def _process_job(self, job_id: str, route: Any = None) -> None:
         job = await self._store.get_job(job_id)
         if not job:
             return
@@ -338,9 +340,16 @@ class WorkerPool:
         await self._store.update_job(job_id, status="processing", updated_at=utc_now())
 
         model = (job.payload.get("llm") or {}).get("model") or self._settings.MOOSE_MODEL
-        if gateway_key:
-            # A partner's job runs on the partner's own gateway key: their models, their budget.
-            llm_client = create_client(self._settings, model, api_key=gateway_key)
+        if route is not None:
+            # A user's job runs on the user's own provider key: their models, their bill.
+            llm_client = OpenAICompatibleClient(
+                base_url=route.base_url,
+                api_key=route.api_key,
+                model=model,
+                timeout=self._settings.MOOSE_TIMEOUT_SECS,
+                provider=route.provider,
+                extra_headers={"X-Title": "Moose"} if route.provider == "openrouter" else None,
+            )
         else:
             llm_client = self.client_for(model)
 
@@ -453,7 +462,7 @@ class WorkerPool:
                     error=str(exc),
                     llm=usage.as_dict(),
                 )
-        if gateway_key and llm_client is not None:
+        if route is not None and llm_client is not None:
             await llm_client.close()
 
 

@@ -16,7 +16,7 @@ def sidebar() -> dict[str, Any]:
         "API key",
         type="password",
         value=st.session_state.get("api_key", ""),
-        help="Your LiteLLM virtual key, or the Moose admin key.",
+        help="Your Moose API token, or the Moose admin key.",
     ).strip()
 
     st.sidebar.divider()

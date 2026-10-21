@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,43 +8,19 @@ from moose.llm import OpenAICompatibleClient
 from moose_api.main import app
 
 ADMIN_KEY = "admin-key"
-MOOSE_GATEWAY_KEY = "sk-moose"
-TEAM_A_KEY = "sk-team-a"
-TEAM_A_SECOND_KEY = "sk-team-a-2"
-TEAM_B_KEY = "sk-team-b"
-# An "LLM API" key: may call models, but the gateway refuses it /key/info.
-TEAM_A_LLM_ONLY_KEY = "sk-team-a-llm-only"
-
 SHARED = ["openai/gpt-oss-120b", "minimax/minimax-m3.1-flash:free"]
-
-# What a LiteLLM gateway reports for each virtual key.
-GATEWAY_KEYS = {
-    MOOSE_GATEWAY_KEY: ({"team_id": None}, SHARED),
-    TEAM_A_KEY: ({"team_id": "team-a"}, ["partner-a/private", *SHARED]),
-    TEAM_A_SECOND_KEY: ({"team_id": "team-a"}, ["partner-a/private", *SHARED]),
-    TEAM_B_KEY: ({"team_id": "team-b"}, SHARED),
-    TEAM_A_LLM_ONLY_KEY: (None, ["partner-a/private", *SHARED]),
-}
+PROVIDER_KEY = "sk-or-v1-user-owned-provider-key-0123456789"
 
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
-    async def fake_key_info(self) -> dict | None:
-        entry = GATEWAY_KEYS.get(self._resolve_api_key())
-        return entry[0] if entry else None
-
     async def fake_list_models(self) -> list[str]:
-        key = self._resolve_api_key()
-        if key not in GATEWAY_KEYS:
-            request = httpx.Request("GET", "http://gw/v1/models")
-            raise httpx.HTTPStatusError("401", request=request, response=httpx.Response(401, request=request))
-        return GATEWAY_KEYS[key][1]
+        return SHARED
 
-    monkeypatch.setattr(OpenAICompatibleClient, "key_info", fake_key_info)
     monkeypatch.setattr(OpenAICompatibleClient, "list_models", fake_list_models)
     env = {
         "MOOSE_API_KEY": ADMIN_KEY,
-        "MOOSE_LLM_API_KEY": MOOSE_GATEWAY_KEY,
+        "MOOSE_LLM_API_KEY": "sk-moose-gateway",
         "MOOSE_MONGO_URL": "",
         "MOOSE_MODEL": "openai/gpt-oss-120b",
         "MOOSE_WORKER_COUNT": "0",
@@ -58,78 +33,167 @@ def client(monkeypatch: pytest.MonkeyPatch):
     get_settings.cache_clear()
 
 
-def _submit(client: TestClient, key: str, **extra) -> str:
+def _admin() -> dict[str, str]:
+    return {"X-API-Key": ADMIN_KEY}
+
+
+def _register(client: TestClient, name: str) -> dict[str, str]:
+    invite = client.post("/admin/invites", json={"note": name}, headers=_admin()).json()
+    resp = client.post("/vault/register", json={"invite_code": invite["invite_code"], "name": name})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _add_key(client: TestClient, token: str) -> str:
     resp = client.post(
-        "/schemas/coarse/ner",
-        json={"text": "Alice works at Moose.", **extra},
-        headers={"X-API-Key": key},
+        "/vault/keys",
+        json={"provider": "openrouter", "api_key": PROVIDER_KEY, "label": "mine", "default_model": "x/y"},
+        headers={"X-API-Key": token},
     )
+    assert resp.status_code == 200, resp.text
+    assert PROVIDER_KEY not in resp.text
+    return resp.json()["key_id"]
+
+
+def _submit(client: TestClient, token: str, **llm) -> str:
+    body = {"text": "Alice works at Moose."}
+    if llm:
+        body["llm"] = llm
+    resp = client.post("/schemas/coarse/ner", json=body, headers={"X-API-Key": token})
     assert resp.status_code == 200, resp.text
     return resp.json()["job_id"]
 
 
-def test_unknown_key_is_rejected(client: TestClient) -> None:
-    assert client.get("/schemas", headers={"X-API-Key": "sk-unknown"}).status_code == 401
+def test_unknown_token_is_rejected(client: TestClient) -> None:
+    for token in ("moose_pt_not-a-real-token", "sk-whatever"):
+        assert client.get("/schemas", headers={"X-API-Key": token}).status_code == 401
 
 
-def test_each_key_sees_its_own_models(client: TestClient) -> None:
-    def models(key: str) -> list[str]:
-        return client.get("/models", headers={"X-API-Key": key}).json()["models"]
+def test_register_lists_own_keys_masked(client: TestClient) -> None:
+    user = _register(client, "Partner A")
+    key_id = _add_key(client, user["token"])
+    models = client.get("/models", headers={"X-API-Key": user["token"]}).json()
+    assert models["models"] == SHARED
+    assert [k["key_id"] for k in models["own_keys"]] == [key_id]
+    me = client.get("/vault/me", headers={"X-API-Key": user["token"]}).text
+    assert PROVIDER_KEY not in me
 
-    assert models(ADMIN_KEY) == SHARED
-    assert models(TEAM_A_KEY) == ["partner-a/private", *SHARED]
-    assert models(TEAM_B_KEY) == SHARED
+
+def test_job_on_own_key_keeps_the_key_in_memory(client: TestClient) -> None:
+    user = _register(client, "Partner A")
+    key_id = _add_key(client, user["token"])
+    job_id = _submit(client, user["token"], key_id=key_id)
+
+    stored = app.state.job_store._jobs[job_id]
+    assert stored.payload["llm"] == {"model": "x/y", "key_id": key_id, "provider": "openrouter"}
+    assert PROVIDER_KEY not in repr(stored.__dict__)
+    queued_job_id, route = app.state.worker_pool._local_queue.get_nowait()
+    assert queued_job_id == job_id
+    assert (route.base_url, route.api_key) == ("https://openrouter.ai/api/v1", PROVIDER_KEY)
 
 
-def test_partners_cannot_pick_other_teams_models(client: TestClient) -> None:
-    _submit(client, TEAM_A_KEY, llm={"model": "partner-a/private"})
+def test_users_are_isolated_from_each_other_and_from_admin(client: TestClient) -> None:
+    alice, bob = _register(client, "Alice"), _register(client, "Bob")
+    alice_key = _add_key(client, alice["token"])
+    job_id = _submit(client, alice["token"], key_id=alice_key)
+
+    assert client.get(f"/jobs/{job_id}", headers={"X-API-Key": alice["token"]}).status_code == 200
+    assert client.get(f"/jobs/{job_id}", headers={"X-API-Key": bob["token"]}).status_code == 404
+    assert client.get(f"/jobs/{job_id}", headers=_admin()).status_code == 404
+
+    stolen = client.post(
+        "/schemas/coarse/ner",
+        json={"text": "x", "llm": {"key_id": alice_key}},
+        headers={"X-API-Key": bob["token"]},
+    )
+    assert stolen.status_code == 404
+    assert client.post("/schemas/coarse/ner", json={"text": "x", "llm": {"key_id": alice_key}}, headers=_admin()).status_code == 400
+    assert client.get("/vault/keys", headers=_admin()).status_code == 403
+
+
+def test_shared_models_still_work_for_users(client: TestClient) -> None:
+    user = _register(client, "Partner A")
+    _submit(client, user["token"])
     refused = client.post(
         "/schemas/coarse/ner",
-        json={"text": "x", "llm": {"model": "partner-a/private"}},
-        headers={"X-API-Key": TEAM_B_KEY},
+        json={"text": "x", "llm": {"model": "very-expensive"}},
+        headers={"X-API-Key": user["token"]},
     )
     assert refused.status_code == 400
-    assert "not available" in refused.json()["detail"]
 
 
-def test_jobs_are_visible_to_the_same_team_only(client: TestClient) -> None:
-    job_id = _submit(client, TEAM_A_KEY)
-    assert client.get(f"/jobs/{job_id}", headers={"X-API-Key": TEAM_A_SECOND_KEY}).status_code == 200
-    assert client.get(f"/jobs/{job_id}", headers={"X-API-Key": TEAM_B_KEY}).status_code == 404
-    assert client.get(f"/jobs/{job_id}", headers={"X-API-Key": ADMIN_KEY}).status_code == 200
+def test_tokens_and_recovery_through_the_api(client: TestClient) -> None:
+    user = _register(client, "Partner A")
+    headers = {"X-API-Key": user["token"]}
+    second = client.post("/vault/tokens", json={"label": "laptop"}, headers=headers).json()
+    assert client.get("/vault/me", headers={"X-API-Key": second["token"]}).status_code == 200
 
-    admin_job = _submit(client, ADMIN_KEY)
-    assert client.get(f"/jobs/{admin_job}", headers={"X-API-Key": TEAM_A_KEY}).status_code == 404
+    assert client.delete(f"/vault/tokens/{user['token_id']}", headers={"X-API-Key": second["token"]}).json() == {
+        "revoked": True
+    }
+    assert client.get("/vault/me", headers=headers).status_code == 401
+
+    recovered = client.post("/vault/recover", json={"recovery_code": user["recovery_code"]}).json()
+    assert client.get("/vault/me", headers={"X-API-Key": recovered["token"]}).status_code == 200
+    assert client.post("/vault/recover", json={"recovery_code": "moose_rc_wrong"}).status_code == 400
 
 
-def test_partner_keys_stay_in_memory(client: TestClient) -> None:
-    job_id = _submit(client, TEAM_A_KEY)
-    stored = app.state.job_store._jobs[job_id]
-    assert TEAM_A_KEY not in repr(stored.__dict__)
-    assert stored.client == "team:team-a"
-    # The job waits in this process's in-memory queue, not the shared queue.
-    assert app.state.worker_pool.local_queue_size() == 1
+def test_unsupported_provider_is_rejected(client: TestClient) -> None:
+    user = _register(client, "Partner A")
+    resp = client.post(
+        "/vault/keys",
+        json={"provider": "custom", "api_key": PROVIDER_KEY, "label": "x"},
+        headers={"X-API-Key": user["token"]},
+    )
+    assert resp.status_code == 400
 
 
 def test_schema_changes_need_admin_key(client: TestClient) -> None:
+    user = _register(client, "Partner A")
     for method, path in [
         ("post", "/schemas/reload"),
         ("delete", "/schemas/some_schema"),
         ("patch", "/schemas/some_schema"),
         ("post", "/schemas/ingest"),
         ("post", "/schemas/ingest/preview"),
+        ("post", "/admin/invites"),
     ]:
-        resp = client.request(method, path, json={}, headers={"X-API-Key": TEAM_A_KEY})
+        resp = client.request(method, path, json={}, headers={"X-API-Key": user["token"]})
         assert resp.status_code == 403, (method, path, resp.status_code)
-    assert client.post("/schemas/reload", headers={"X-API-Key": ADMIN_KEY}).status_code == 200
+    assert client.post("/schemas/reload", headers=_admin()).status_code == 200
 
 
-def test_llm_only_keys_are_accepted_but_stand_for_themselves(client: TestClient) -> None:
-    models = client.get("/models", headers={"X-API-Key": TEAM_A_LLM_ONLY_KEY})
-    assert models.status_code == 200
-    assert "partner-a/private" in models.json()["models"]
+@pytest.mark.asyncio
+async def test_worker_calls_the_users_provider_with_their_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from moose.config import Settings
+    from moose_api.queue import InMemoryJobStore, InMemoryQueue, JobRecord, WorkerPool
+    from moose_api.vault_store import ProviderRoute
 
-    job_id = _submit(client, TEAM_A_LLM_ONLY_KEY)
-    assert client.get(f"/jobs/{job_id}", headers={"X-API-Key": TEAM_A_LLM_ONLY_KEY}).status_code == 200
-    # Without /key/info the team is unknown, so other keys of the team do not see the job.
-    assert client.get(f"/jobs/{job_id}", headers={"X-API-Key": TEAM_A_KEY}).status_code == 404
+    seen: dict[str, str] = {}
+
+    async def fake_generate(self, prompt: str) -> str:
+        seen.update(base_url=str(self._client.base_url).rstrip("/"), key=self._resolve_api_key(), model=self.model)
+        raise RuntimeError("stop after recording")
+
+    monkeypatch.setattr(OpenAICompatibleClient, "generate", fake_generate)
+    settings = Settings(_env_file=None, MOOSE_MODEL="shared", MOOSE_WORKER_COUNT=0, MOOSE_MAX_RETRIES=0)
+    store = InMemoryJobStore()
+    pool = WorkerPool(InMemoryQueue(10), store, None, settings)
+    await store.put_job(
+        JobRecord(
+            job_id="j1",
+            endpoint_type="ner",
+            payload={"schema": "coarse", "text": "Alice", "llm": {"model": "x/y", "key_id": "k1"}},
+            status="queued",
+            created_at="now",
+            updated_at="now",
+            retries=0,
+            client="user:u1",
+        )
+    )
+    route = ProviderRoute(provider="openrouter", base_url="https://openrouter.ai/api/v1", api_key=PROVIDER_KEY, secret_id="k1")
+    await pool._process_job("j1", route)
+
+    assert seen == {"base_url": "https://openrouter.ai/api/v1", "key": PROVIDER_KEY, "model": "x/y"}
+    job = await store.get_job("j1")
+    assert job.status == "failed" and PROVIDER_KEY not in (job.error or "")

@@ -136,7 +136,7 @@ accepts no direct traffic for Moose.
 | --- | --- | --- |
 | Streamlit UI | `http://moose-demo:8501` | Cloudflare Access: allowed people only |
 | Gateway admin | `http://litellm:4000` | Cloudflare Access: gateway admins only, then the LiteLLM admin login |
-| API | `http://moose-api:8000` | Partners with a Moose API key, rate-limited by Cloudflare |
+| API | `http://moose-api:8000` | Users with their vault API token, rate-limited by Cloudflare |
 
 Set this up in the Cloudflare dashboard (Zero Trust):
 
@@ -159,8 +159,7 @@ Set this up in the Cloudflare dashboard (Zero Trust):
 Then, on the VM:
 
 4. In the env file, keep both bind addresses at `127.0.0.1`.
-5. Onboard partners in the gateway as described in
-   [Partners](#partners); Moose itself needs no change per partner.
+5. Onboard partners with invitations as described in [Partners](#partners).
 
 ## Library use
 
@@ -182,46 +181,64 @@ llm = OpenRouterClient(api_key=lambda: keyring.get_password("moose", "openrouter
 All API calls require:
 - `X-API-Key: <your-key>`
 
-`MOOSE_API_KEY` is the admin key. Partners use their own LiteLLM virtual key
-as API key (see [Partners](#partners)).
+`MOOSE_API_KEY` is the admin key. External users use their own vault API
+token (see [Partners](#partners)).
 
 ## Partners
 
-Each partner is a *team* in the LiteLLM gateway, and uses a virtual key of that
-team as their Moose API key. Moose checks the key with the gateway and runs the
-partner's LLM calls with it, so the gateway decides which models each partner
-sees and enforces their budget.
+External users bring their own LLM provider keys to the hosted Moose. Each user
+has a personal *vault*: their provider keys are encrypted with a data key that
+only the user's API tokens or recovery code can unlock. Moose stores token
+hashes, wrapped keys and ciphertext, so the operator cannot read users' keys or
+run jobs on them without the user. The design and its limits are described in
+[docs/design/partner-keys.md](docs/design/partner-keys.md).
 
-- **Models.** A partner sees the models allowed on their team: your shared
-  models plus any you add for them. In the free LiteLLM edition only gateway
-  admins can add models; team-private models that partners add themselves need
-  LiteLLM Enterprise. To give a partner a private model, add it with a
-  partner-specific public name (for example `partner-a/<model>`) and allow it
-  on that partner's team only. Other teams cannot see or call it.
-- **Keys.** The partner's key is held only in the memory of the Moose process
-  that accepted the job and is never stored. If Moose restarts before a
-  partner's job finishes, the job fails with a request to submit it again. Run
-  the API as one process (`MOOSE_WEB_CONCURRENCY=1`).
-- **Isolation.** Partners can read jobs of their own team only, cannot change
-  schemas (`/schemas/ingest`, preview, patch, delete, reload) and cannot see
-  admin jobs. Revoking or blocking a key in the gateway locks it out of Moose
-  within a minute.
-- **Moose's own key.** Keep `MOOSE_LLM_API_KEY` limited to the `shared` group,
-  so admin jobs never use (or pay for) a partner's private model.
+1. **Invite.** The admin creates a one-time invitation and sends the code to
+   the user:
 
-Give partners keys of type *Default*. Keys of type *LLM API* also work, but the
-gateway does not tell Moose their team, so such a key only sees its own jobs,
-not those of other keys in the same team.
+   ```bash
+   curl -sS -X POST http://localhost:8000/admin/invites \
+     -H "X-API-Key: <admin-key>" -H "Content-Type: application/json" \
+     -d '{"note": "Partner A"}'
+   ```
 
-To onboard a partner: create a team whose models are the `shared` group (plus
-any private ones) with a budget, create a virtual key for that team, and give the partner
-the key. With the gateway published behind Cloudflare Access, partners can also
-get their own LiteLLM login as team members to manage their keys and see their
-usage.
+2. **Register.** The user redeems it and receives their first API token and a
+   recovery code, each shown once:
 
-Requests never send LLM keys. They may choose one of the models the
-administrator made available (`GET /models`) with `"llm": {"model": "<name>"}`;
-see [LLM gateway](#llm-gateway).
+   ```bash
+   curl -sS -X POST http://localhost:8000/vault/register \
+     -H "Content-Type: application/json" \
+     -d '{"invite_code": "<invite-code>", "name": "Partner A"}'
+   ```
+
+3. **Add a provider key.** Supported providers: `GET /vault/providers`
+   (OpenRouter, OpenAI). Only a masked form is ever returned:
+
+   ```bash
+   curl -sS -X POST http://localhost:8000/vault/keys \
+     -H "X-API-Key: <user-token>" -H "Content-Type: application/json" \
+     -d '{"provider": "openrouter", "api_key": "<their key>", "label": "main",
+          "default_model": "openai/gpt-oss-120b"}'
+   ```
+
+4. **Run jobs on it** with `"llm": {"key_id": "<key_id>"}` and optionally a
+   `model`. Without `key_id`, users get the shared models (`GET /models`).
+
+More: `GET /vault/me`, `POST /vault/tokens` (one token per script or machine),
+`DELETE /vault/tokens/{id}`, `DELETE /vault/keys/{id}`, and `POST /vault/recover`
+with the recovery code. Losing every token and the recovery code makes the
+vault unreadable, by design.
+
+- **During a job** the user's provider key is decrypted in memory only, in the
+  process that accepted the job. If Moose restarts first, the job fails with a
+  request to submit it again. Run the API as one process
+  (`MOOSE_WEB_CONCURRENCY=1`).
+- **Isolation.** Users see only their own jobs and keys; the admin cannot read
+  users' jobs through the API, use their keys, or list their vault. Users
+  cannot change schemas or create invitations.
+- **Limit.** A modified, malicious server could capture keys while a job runs.
+  Users reduce that risk with provider keys made only for Moose, with a small
+  budget, the models they need, and an expiry.
 
 ## Core Usage (curl)
 

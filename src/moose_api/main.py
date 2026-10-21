@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import time
@@ -9,7 +8,6 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
-import httpx
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
@@ -22,7 +20,9 @@ from moose.llm import OpenAICompatibleClient, create_client
 from moose.pipelines import load_privacy_profiles
 from moose.schema import get_schema_config, list_schema_names, reload_schema_registry
 from moose.privacy import get_machine_report_json_schema, list_policy_packs
+from moose.vault import VaultError
 from moose_api.queue import JobRecord, WorkerPool, build_backends, utc_now
+from moose_api.vault_store import PROVIDERS, ProviderRoute, Unlocked, VaultStore
 
 
 class LLMOptions(BaseModel):
@@ -31,9 +31,14 @@ class LLMOptions(BaseModel):
     model: str | None = Field(
         default=None,
         description=(
-            "One of the models the administrator made available to Moose (see GET /models). "
-            "Defaults to the server's default model."
+            "Model to use. Without key_id: one of the shared models (see GET /models), defaulting "
+            "to the server's default. With key_id: any model of that provider, defaulting to the "
+            "key's default model."
         ),
+    )
+    key_id: str | None = Field(
+        default=None,
+        description="Run on one of your own provider keys (see GET /vault/keys) instead of a shared model.",
     )
 
 
@@ -321,75 +326,28 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 # Two kinds of callers:
-# - admin: MOOSE_API_KEY. Full access; LLM calls use Moose's own gateway key.
-# - partners: their own LiteLLM virtual key. Moose checks it with the gateway, and their
-#   LLM calls use that key, so the gateway decides which models they see and pay for.
-#   The key is kept in memory only, never stored. Partners cannot change schemas and
-#   only see jobs from their own LiteLLM team.
+# - admin: MOOSE_API_KEY. Full access; LLM calls use Moose's own gateway key (shared models).
+# - users: a vault API token (see docs/design/partner-keys.md). The token unlocks the user's
+#   vault in memory for the request, so their own provider keys can be used; the server
+#   stores only hashes, wrapped keys and ciphertext. Users cannot change schemas and only
+#   see their own jobs.
 ADMIN_CLIENT = "admin"
 _LLM_NOT_CONFIGURED = "The LLM is not configured on this server. The administrator must set MOOSE_MODEL."
-_GATEWAY_CACHE_TTL_SECS = 60.0
+_MODEL_CACHE_TTL_SECS = 60.0
 
 _current_client: ContextVar[str | None] = ContextVar("moose_api_client", default=None)
-# The caller's own gateway key (partners); None means Moose's key (admin).
-_current_gateway_key: ContextVar[str | None] = ContextVar("moose_gateway_key", default=None)
+# The caller's unlocked vault (users only); never stored.
+_current_vault: ContextVar[Unlocked | None] = ContextVar("moose_vault", default=None)
 
 
-def _key_hash(key: str) -> str:
-    return hashlib.sha256(key.encode()).hexdigest()
-
-
-def _gateway_client(api_key: str | None) -> OpenAICompatibleClient:
+def _gateway_client() -> OpenAICompatibleClient:
     settings: Settings = app.state.settings
     return OpenAICompatibleClient(
         base_url=settings.MOOSE_LLM_BASE_URL,
-        api_key=api_key or settings.MOOSE_LLM_API_KEY,
+        api_key=settings.MOOSE_LLM_API_KEY,
         model=settings.MOOSE_MODEL or "",
         timeout=10.0,
     )
-
-
-def _cache_get(name: str, key: str) -> Any:
-    entry = app.state.gateway_cache.get((name, _key_hash(key)))
-    if entry and time.monotonic() - entry[0] < _GATEWAY_CACHE_TTL_SECS:
-        return entry[1]
-    return None
-
-
-def _cache_put(name: str, key: str, value: Any) -> None:
-    app.state.gateway_cache[(name, _key_hash(key))] = (time.monotonic(), value)
-
-
-async def _partner_identity(token: str) -> str | None:
-    """Client name for a valid LiteLLM virtual key ("team:<id>"), or None if invalid."""
-    settings: Settings = app.state.settings
-    if settings.MOOSE_LLM_PROVIDER.lower() != "gateway" or not token:
-        return None
-    cached = _cache_get("identity", token)
-    if cached is not None:
-        return cached or None
-    client = _gateway_client(token)
-    identity = ""
-    try:
-        info = await client.key_info()
-        if info is not None:
-            if not info.get("blocked"):
-                team_id = info.get("team_id")
-                identity = f"team:{team_id}" if team_id else f"key:{_key_hash(token)[:16]}"
-        else:
-            # Keys limited to LLM routes ("LLM API" type) may not read /key/info. Such a key
-            # is still valid if it can list its models; it then stands for itself, not its team.
-            try:
-                await client.list_models()
-                identity = f"key:{_key_hash(token)[:16]}"
-            except httpx.HTTPStatusError:
-                identity = ""
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"Could not verify the key with the LLM gateway: {exc}") from exc
-    finally:
-        await client.close()
-    _cache_put("identity", token, identity)
-    return identity or None
 
 
 async def require_api_key(
@@ -402,14 +360,25 @@ async def require_api_key(
     token = api_key or (bearer.credentials if bearer else None) or ""
     if hmac.compare_digest(token.encode(), admin_key.encode()):
         _current_client.set(ADMIN_CLIENT)
-        _current_gateway_key.set(None)
+        _current_vault.set(None)
         return ADMIN_CLIENT
-    identity = await _partner_identity(token)
-    if identity is None:
+    try:
+        unlocked = await app.state.vault.unlock(token)
+    except VaultError:
+        unlocked = None
+    if unlocked is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    _current_client.set(identity)
-    _current_gateway_key.set(token)
-    return identity
+    client = f"user:{unlocked.user_id}"
+    _current_client.set(client)
+    _current_vault.set(unlocked)
+    return client
+
+
+async def require_user(client: str = Depends(require_api_key)) -> Unlocked:
+    unlocked = _current_vault.get()
+    if unlocked is None:
+        raise HTTPException(status_code=403, detail="This operation needs a user API token.")
+    return unlocked
 
 
 async def require_admin_key(client: str = Depends(require_api_key)) -> str:
@@ -444,13 +413,18 @@ async def startup() -> None:
         raise RuntimeError("MOOSE_API_KEY is required for the API service")
 
     job_store, queue_backend, info = await build_backends(settings)
+    mongo_client = info.get("mongo_client")
+    vault_store = (
+        await VaultStore.mongo(mongo_client[settings.MOOSE_MONGO_DB]) if mongo_client else VaultStore.in_memory()
+    )
 
     # Default model (MOOSE_MODEL). Requests may pick another model the administrator made
     # available to Moose's gateway key; the gateway enforces that list.
     llm_client = create_client(settings) if settings.MOOSE_MODEL else None
 
     app.state.settings = settings
-    app.state.gateway_cache = {}
+    app.state.vault = vault_store
+    app.state.model_cache = None
     app.state.job_store = job_store
     app.state.queue_backend = queue_backend
     app.state.queue_info = info
@@ -478,24 +452,23 @@ def _new_job_id() -> str:
 
 
 async def _available_models() -> list[str]:
-    """Models the caller may use: whatever their gateway key (or Moose's, for admin) allows."""
+    """Shared models: whatever Moose's own gateway key allows."""
     settings: Settings = app.state.settings
     if not settings.MOOSE_MODEL:
         raise HTTPException(status_code=503, detail=_LLM_NOT_CONFIGURED)
     if settings.MOOSE_LLM_PROVIDER.lower() != "gateway":
         return [settings.MOOSE_MODEL]
-    key = _current_gateway_key.get() or settings.MOOSE_LLM_API_KEY or ""
-    cached = _cache_get("models", key)
-    if cached is not None:
-        return cached
-    client = _gateway_client(key)
+    cached = app.state.model_cache
+    if cached and time.monotonic() - cached[0] < _MODEL_CACHE_TTL_SECS:
+        return cached[1]
+    client = _gateway_client()
     try:
         models = await client.list_models()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"Could not read the model list from the LLM gateway: {exc}") from exc
     finally:
         await client.close()
-    _cache_put("models", key, models)
+    app.state.model_cache = (time.monotonic(), models)
     return models
 
 
@@ -515,7 +488,7 @@ async def _resolve_model(requested: str | None) -> str:
     models = await _available_models()
     model = requested or _default_model(models)
     if model is None:
-        raise HTTPException(status_code=400, detail="No LLM models are available for this API key.")
+        raise HTTPException(status_code=400, detail="No shared LLM models are available.")
     if model not in models:
         raise HTTPException(
             status_code=400,
@@ -524,15 +497,32 @@ async def _resolve_model(requested: str | None) -> str:
     return model
 
 
+async def _resolve_llm(llm: LLMOptions) -> tuple[dict[str, Any], ProviderRoute | None]:
+    """Payload `llm` block (no secrets) and, for a user's own key, the in-memory route."""
+    if not llm.key_id:
+        return {"model": await _resolve_model(llm.model)}, None
+    unlocked = _current_vault.get()
+    if unlocked is None:
+        raise HTTPException(status_code=400, detail="key_id needs a user API token.")
+    try:
+        route, key = await app.state.vault.route(unlocked, llm.key_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No such key in your vault (see GET /vault/keys).") from None
+    model = llm.model or key.get("default_model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Choose llm.model, or set a default model on this key.")
+    return {"model": model, "key_id": llm.key_id, "provider": route.provider}, route
+
+
 async def _enqueue_job(endpoint_type: str, payload: dict, llm: LLMOptions, needs_llm: bool = True):
     settings: Settings = app.state.settings
     queue_backend = app.state.queue_backend
     job_store = app.state.job_store
 
+    route: ProviderRoute | None = None
     if needs_llm:
-        payload["llm"] = {"model": await _resolve_model(llm.model)}
+        payload["llm"], route = await _resolve_llm(llm)
 
-    gateway_key = _current_gateway_key.get()
     worker_pool = app.state.worker_pool
     queue_size = await queue_backend.size() + worker_pool.local_queue_size()
     if queue_size >= settings.MOOSE_QUEUE_MAXSIZE:
@@ -552,9 +542,9 @@ async def _enqueue_job(endpoint_type: str, payload: dict, llm: LLMOptions, needs
     )
     await job_store.put_job(job)
     try:
-        if gateway_key:
-            # Partner jobs run in this process, so their key never leaves memory.
-            worker_pool.enqueue_local(job_id, gateway_key)
+        if route is not None:
+            # Jobs on a user's own key run in this process, so the key never leaves memory.
+            worker_pool.enqueue_local(job_id, route)
         else:
             await queue_backend.enqueue(job_id)
     except Exception as exc:  # noqa: BLE001
@@ -838,8 +828,9 @@ async def delete_schema(schema_name: str, remove_files: bool = True) -> dict[str
 async def _get_visible_job(job_id: str) -> JobRecord:
     job = await app.state.job_store.get_job(job_id)
     client = _current_client.get()
-    # Partners only see their own jobs; jobs from before per-client keys belong to admin.
-    if not job or (client != ADMIN_CLIENT and (job.client or ADMIN_CLIENT) != client):
+    # Each caller sees only their own jobs; the admin cannot read users' jobs through the
+    # API. Jobs from before per-client keys belong to admin.
+    if not job or (job.client or ADMIN_CLIENT) != client:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
@@ -1015,9 +1006,124 @@ def _load_user_schema_assets(data_dir: Path) -> list[dict[str, Any]]:
 
 @app.get("/models", dependencies=[Depends(require_api_key)], tags=["Metadata"])
 async def list_models() -> dict[str, Any]:
-    """Models this API key may use (set up by the administrator or the caller's LiteLLM team)."""
+    """Shared models (set up by the administrator) and, for users, their own provider keys."""
     models = await _available_models()
-    return {"default_model": _default_model(models), "models": models}
+    response: dict[str, Any] = {"default_model": _default_model(models), "models": models}
+    unlocked = _current_vault.get()
+    if unlocked is not None:
+        response["own_keys"] = await app.state.vault.list_secrets(unlocked.user_id)
+    return response
+
+
+# -----------------
+# Vault: user accounts and their own provider keys
+# -----------------
+class InviteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note: str | None = Field(default=None, description="For your records, e.g. the partner's name.")
+    valid_days: int = Field(default=7, ge=1, le=90)
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    invite_code: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=200)
+
+
+class RecoverRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recovery_code: str = Field(min_length=1)
+    label: str = Field(default="recovered", max_length=100)
+
+
+class TokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(min_length=1, max_length=100)
+
+
+class ProviderKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(description="One of the supported providers (see GET /vault/providers).")
+    api_key: str = Field(min_length=8, repr=False)
+    label: str = Field(min_length=1, max_length=100)
+    default_model: str | None = Field(default=None, description="Model used when a job names this key but no model.")
+
+
+@app.post("/admin/invites", dependencies=[Depends(require_admin_key)], tags=["Vault"])
+async def create_invite(request: InviteRequest) -> dict[str, str]:
+    """One-time invitation for a new user. Send the code to the user; it works once."""
+    return await app.state.vault.create_invite(request.note, request.valid_days)
+
+
+@app.post("/vault/register", tags=["Vault"])
+async def register(request: RegisterRequest) -> dict[str, str]:
+    """Redeem an invitation. Returns the first API token and a recovery code, each shown
+    only once. Moose stores neither, so they cannot be shown again or recovered by the operator."""
+    try:
+        return await app.state.vault.register(request.invite_code, request.name)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/vault/recover", tags=["Vault"])
+async def recover(request: RecoverRequest) -> dict[str, str]:
+    """Create a new API token with the recovery code, e.g. after losing all tokens."""
+    try:
+        return await app.state.vault.recover(request.recovery_code, request.label)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/vault/providers", tags=["Vault"])
+async def list_providers() -> dict[str, list[str]]:
+    return {"providers": sorted(PROVIDERS)}
+
+
+@app.get("/vault/me", tags=["Vault"])
+async def vault_me(unlocked: Unlocked = Depends(require_user)) -> dict[str, Any]:
+    store: VaultStore = app.state.vault
+    return {
+        "user_id": unlocked.user_id,
+        "current_token_id": unlocked.token_id,
+        "tokens": await store.list_tokens(unlocked.user_id),
+        "keys": await store.list_secrets(unlocked.user_id),
+    }
+
+
+@app.post("/vault/tokens", tags=["Vault"])
+async def create_token(request: TokenRequest, unlocked: Unlocked = Depends(require_user)) -> dict[str, str]:
+    """Another API token for the same vault (e.g. one per script or machine), shown once."""
+    return await app.state.vault.create_token(unlocked, request.label)
+
+
+@app.delete("/vault/tokens/{token_id}", tags=["Vault"])
+async def revoke_token(token_id: str, unlocked: Unlocked = Depends(require_user)) -> dict[str, bool]:
+    if not await app.state.vault.revoke_token(unlocked.user_id, token_id):
+        raise HTTPException(status_code=404, detail="Token not found")
+    return {"revoked": True}
+
+
+@app.get("/vault/keys", tags=["Vault"])
+async def list_provider_keys(unlocked: Unlocked = Depends(require_user)) -> dict[str, Any]:
+    return {"keys": await app.state.vault.list_secrets(unlocked.user_id)}
+
+
+@app.post("/vault/keys", tags=["Vault"])
+async def add_provider_key(request: ProviderKeyRequest, unlocked: Unlocked = Depends(require_user)) -> dict[str, Any]:
+    """Store a provider key, encrypted with your vault's data key. Only a masked form is ever returned."""
+    try:
+        return await app.state.vault.add_secret(
+            unlocked, request.provider, request.api_key, request.label, request.default_model
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/vault/keys/{key_id}", tags=["Vault"])
+async def delete_provider_key(key_id: str, unlocked: Unlocked = Depends(require_user)) -> dict[str, bool]:
+    if not await app.state.vault.delete_secret(unlocked.user_id, key_id):
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"deleted": True}
 
 
 @app.get("/assets", dependencies=[Depends(require_api_key)], tags=["Metadata"])
