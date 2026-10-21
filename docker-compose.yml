@@ -1,3 +1,13 @@
+# One Compose file for local use and production. Start it with ./scripts/deploy.sh,
+# which prepares the bind mounts and the proxy network first.
+name: moose
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   moose-api:
     build: .
@@ -8,6 +18,8 @@ services:
     environment:
       MOOSE_API_PORT: "8000"
       MOOSE_MONGO_URL: mongodb://mongo:27017
+      MOOSE_LLM_PROVIDER: gateway
+      MOOSE_LLM_BASE_URL: http://litellm:4000/v1
     command:
       - uvicorn
       - moose_api.main:app
@@ -15,15 +27,30 @@ services:
       - 0.0.0.0
       - --port
       - "8000"
+      # One process: partner jobs and their in-memory gateway keys stay in it.
       - --workers
-      - "${MOOSE_WEB_CONCURRENCY:-4}"
+      - "${MOOSE_WEB_CONCURRENCY:-1}"
       - --proxy-headers
       - --forwarded-allow-ips
       - "*"
+    volumes:
+      # User-ingested schemas survive rebuilds.
+      - ./data/moose-user:/app/src/moose/data/user
+      - type: bind
+        source: ./data/user_vocabularies.json
+        target: /app/src/moose/data/user_vocabularies.json
+        bind:
+          create_host_path: false
+    networks:
+      - default
+      - proxy
     depends_on:
       mongo:
         condition: service_healthy
+      litellm:
+        condition: service_healthy
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test:
         - CMD
@@ -42,10 +69,66 @@ services:
   mongo:
     image: mongo:7
     volumes:
-      - ./data/mongo:/data/db
+      # A host folder by default (the VM's existing data). On macOS set
+      # MOOSE_MONGO_VOLUME=moose-mongo: Docker Desktop files under ~/Desktop or
+      # ~/Documents get macOS protection tags that stop MongoDB opening them.
+      - ${MOOSE_MONGO_VOLUME:-./data/mongo}:/data/db
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # LLM gateway. Holds every provider key. It joins the proxy network so the admin UI
+  # can be published through Cloudflare, but only behind Cloudflare Access.
+  litellm:
+    # Pinned by digest: update deliberately after reviewing the release.
+    image: ghcr.io/berriai/litellm-database:v1.104.5@sha256:80ff05b0ef682313c4c45571589f8bd255f7e0c718003b8df0ef6ce2716c52d3
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "${LITELLM_BIND_ADDRESS:-127.0.0.1}:${LITELLM_PORT:-4000}:4000"
+    environment:
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?Set LITELLM_DB_PASSWORD}@litellm-db:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?Set LITELLM_SALT_KEY}
+      UI_USERNAME: ${LITELLM_UI_USERNAME:-admin}
+      UI_PASSWORD: ${LITELLM_UI_PASSWORD:?Set LITELLM_UI_PASSWORD}
+    volumes:
+      - ./deploy/litellm/config.yaml:/app/config.yaml:ro
+    networks:
+      - default
+      - proxy
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  litellm-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?Set LITELLM_DB_PASSWORD}
+    volumes:
+      - ./data/litellm-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "litellm", "-d", "litellm"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -59,10 +142,14 @@ services:
       - "${MOOSE_BIND_ADDRESS:-127.0.0.1}:${MOOSE_DEMO_PORT:-8501}:8501"
     environment:
       MOOSE_API_BASE_URL: http://moose-api:8000
+    networks:
+      - default
+      - proxy
     depends_on:
       moose-api:
         condition: service_healthy
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test:
         - CMD
@@ -73,3 +160,13 @@ services:
       timeout: 3s
       retries: 10
       start_period: 20s
+
+volumes:
+  moose-mongo:
+
+networks:
+  # Shared with the reverse proxy or tunnel (cloudflare_default on the VM).
+  # The databases never join it.
+  proxy:
+    name: ${MOOSE_PROXY_NETWORK:-moose-proxy}
+    external: true

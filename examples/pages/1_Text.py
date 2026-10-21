@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from moose_ui.config import build_llm_headers, sidebar, validate_common
+from moose_ui.config import sidebar, validate_common
 from moose_ui.metadata import clear_metadata_caches, fetch_schemas, schemas_supporting
 from moose_ui.samples import DEFAULT_TEXT_SAMPLE
 from moose_ui.submit import submit_and_render_job
@@ -18,7 +18,6 @@ if not cfg.get("api_key"):
     st.info("Enter your Moose API key in the sidebar.")
     st.stop()
 
-st.caption(f"Provider: {cfg['provider']} | Model: {cfg['model']}")
 if st.button("Refresh schema list", key="text_refresh_schemas"):
     clear_metadata_caches()
     st.rerun()
@@ -55,14 +54,13 @@ if st.button("Run NER", type="primary"):
 
     payload = {
         "text": text,
-        "llm": {"provider": cfg["provider"], "model": cfg["model"]},
     }
 
     submit_and_render_job(
         cfg=cfg,
         path=f"/schemas/{schema}/ner",
         payload=payload,
-        headers=build_llm_headers(cfg),
+        headers={},
         label=f"Text NER ({schema})",
         auto_poll=auto_poll,
     )

@@ -20,58 +20,42 @@ Use this README as a quick usage guide. For deep technical details, see the docs
 
 ### Option A: Docker (recommended)
 
-```bash
-cp .env.example .env
-# Set MOOSE_API_KEY in .env before starting.
-docker compose up -d --build
-```
-
-Default local endpoints:
-- API: `http://localhost:8000`
-- Frontend (Streamlit): `http://localhost:8501`
-
-### Production deployment
-
-Use `docker-compose.yml` with `docker-compose.prod.yml` for the API, MongoDB,
-and Streamlit. MongoDB uses `./data/mongo` in both configurations. The override
-adds persistent user schema storage,
-bounded logs, and a shared proxy network. Both application ports bind to
-loopback by default; MongoDB has no published port.
+The same `docker-compose.yml` is used locally and in production.
 
 ```bash
 cp .env.example .env
-# Set MOOSE_API_KEY and MOOSE_PROXY_NETWORK in .env.
-docker network create moose-proxy  # Only if this proxy network does not exist.
+# Set MOOSE_API_KEY and the LITELLM_* secrets in .env before starting.
 ./scripts/deploy.sh
 ```
 
-The deployment script prepares the user schema bind mounts and waits for all
-three services to become healthy. The equivalent Compose command, after
-preparing those mounts, is:
+The script validates the configuration, creates the proxy network
+(`MOOSE_PROXY_NETWORK`, default `moose-proxy`) if it is missing, prepares the
+data folders, then builds and starts all services and waits until they are
+healthy. Rerun it after pulling updates. Check the services with
+`docker compose ps`.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait
-```
+Default endpoints, all bound to loopback:
+- API: `http://localhost:8000`
+- Frontend (Streamlit): `http://localhost:8501`
+- LLM gateway admin UI (LiteLLM): `http://localhost:4000/ui`
 
-Attach your existing reverse proxy or tunnel to `MOOSE_PROXY_NETWORK` and route
-the API to `http://moose-api:8000` and Streamlit to `http://moose-demo:8501`.
-The proxy must support WebSockets for Streamlit. Users enter their Moose API
-key and LLM provider key in the Streamlit sidebar.
+Then connect an LLM provider as described in [LLM gateway](#llm-gateway).
 
-For an existing deployment, keep the same Compose project name and MongoDB
-data directory. The production default project name is `moose`, retaining the
-existing `./data/mongo` bind mount. Set `COMPOSE_PROJECT_NAME` if your
-deployment uses a different project name. Preserve `data/moose-user/` and
-`data/user_vocabularies.json` when updating the checkout.
+### Production notes
 
-An existing `.env.moose` can be reused with
-`MOOSE_ENV_FILE=.env.moose ./scripts/deploy.sh`. Set `MOOSE_PROXY_NETWORK=cloudflare_default`
-in that file when reusing the existing Cloudflare network. The tunnel remains
-managed separately as VM infrastructure; Moose needs no Cloudflare-specific
-Compose file.
-
-After pulling updates on the VM, rerun `./scripts/deploy.sh`. Check the services
-with `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps`.
+- **Public access:** go through Cloudflare only, as described in
+  [Cloudflare deployment](#cloudflare-deployment). Keep `MOOSE_BIND_ADDRESS` and
+  `LITELLM_BIND_ADDRESS` at `127.0.0.1` so nothing bypasses it.
+- **Existing VM deployment:** the Compose project name is fixed to `moose` and
+  MongoDB keeps using `./data/mongo`, so updates reuse the existing data.
+  Preserve `data/` when updating the checkout.
+- **Env file:** an existing `.env.moose` can be used with
+  `MOOSE_ENV_FILE=.env.moose ./scripts/deploy.sh`. Set
+  `MOOSE_PROXY_NETWORK=cloudflare_default` there to reuse the Cloudflare
+  network; the tunnel itself stays managed separately on the VM.
+- Users enter only their Moose API key in the Streamlit sidebar and can pick
+  one of the models the administrator made available; LLM provider keys stay
+  in the gateway.
 
 ### Option B: Local API only
 
@@ -81,7 +65,116 @@ source .venv/bin/activate
 pip install -e .
 
 export MOOSE_API_KEY=test-dev-key
+export MOOSE_LLM_BASE_URL=http://localhost:4000/v1   # LiteLLM gateway
+export MOOSE_LLM_API_KEY=<gateway-virtual-key>
+export MOOSE_MODEL=openai/gpt-oss-120b               # default model (gateway name)
 uvicorn moose_api.main:app --host 0.0.0.0 --port 8000
+```
+
+## LLM gateway
+
+LLM-backed operations go through a [LiteLLM](https://docs.litellm.ai/) gateway,
+which runs as the `litellm` service (with its own Postgres) in Docker Compose.
+Provider keys never pass through Moose requests and are never stored in Moose's
+database.
+
+1. **Log in to the admin UI** at `/ui` (locally `http://localhost:4000/ui`; in
+   production the Cloudflare hostname) with `LITELLM_UI_USERNAME` /
+   `LITELLM_UI_PASSWORD` from the env file. LiteLLM shows a warning that this
+   shared login is enabled; that is expected here, because the UI is reachable
+   only on localhost or behind Cloudflare Access. Use a long random password.
+2. **Add models.** Under *Models + Endpoints → Add Model*, choose *Custom
+   Model Name* and enter the provider route, for example
+   `openrouter/openai/gpt-oss-120b`. Set the *Public Model Name* to the model's
+   own ID without the provider prefix (`openai/gpt-oss-120b`); that is the name
+   Moose shows. Select the stored OpenRouter key under *Existing Credentials*.
+   For a model everyone may use, set the *Model Access Group* to `shared` when
+   creating it (it cannot be added afterwards; delete and re-add the model
+   instead). Keys are stored encrypted with `LITELLM_SALT_KEY`; never change that
+   value after the first start.
+3. **Create a virtual key for Moose.** Under *Virtual Keys*, create a key with a
+   budget whose *Models* is the access group `shared`. Put it in `.env` as
+   `MOOSE_LLM_API_KEY`, set `MOOSE_MODEL` to the default model's public name
+   (for example `openai/gpt-oss-120b`), and rerun `./scripts/deploy.sh`.
+
+**The administrator decides which models each caller can use.** Moose's own key
+(used for admin requests) and every partner team get the `shared` group, so a
+new shared model appears for everyone within a minute, with no restart and no
+list to edit. `GET /models` lists a caller's models, the Streamlit sidebar
+offers them, and requests may pick one with `"llm": {"model": "<name>"}`;
+without it, Moose uses `MOOSE_MODEL`. Any other name is rejected, and the
+gateway refuses it too. Each key's budget caps its spend.
+
+Every job response includes an `llm` block recording what actually ran:
+
+```json
+"llm": {
+  "requested_model": "openai/gpt-oss-120b",
+  "models_used": ["openrouter/openai/gpt-oss-120b"],
+  "calls": 1, "prompt_tokens": 812, "completion_tokens": 164,
+  "cost_usd": 0.00021, "fallbacks": 0
+}
+```
+
+Rotating or adding a provider key is done in the gateway UI and needs no Moose
+restart. With OpenRouter, provider keys you add in OpenRouter's own *BYOK*
+settings are used first for the providers they cover, with OpenRouter's shared
+capacity as fallback unless you disable it there; Moose and LiteLLM need no
+change for that. Prompt and response logging is turned off in
+[`deploy/litellm/config.yaml`](deploy/litellm/config.yaml) because Moose sends
+sensitive data through the gateway. The LiteLLM image is pinned by digest;
+review release notes before changing it.
+
+## Cloudflare deployment
+
+In production, everything public goes through the existing Cloudflare Tunnel
+(`cloudflared` on `MOOSE_PROXY_NETWORK`). The tunnel only makes outbound
+connections, and the containers publish ports on `127.0.0.1` only, so the VM
+accepts no direct traffic for Moose.
+
+| Hostname | Service | Who gets in |
+| --- | --- | --- |
+| Streamlit UI | `http://moose-demo:8501` | Cloudflare Access: allowed people only |
+| Gateway admin | `http://litellm:4000` | Cloudflare Access: gateway admins only, then the LiteLLM admin login |
+| API | `http://moose-api:8000` | Partners with a Moose API key, rate-limited by Cloudflare |
+
+Set this up in the Cloudflare dashboard (Zero Trust):
+
+1. **Access applications.** Under *Access → Applications*, add a self-hosted
+   application for the UI hostname and one for the gateway hostname. Give each
+   an *Allow* policy: for the UI, the people or email domain that may use Moose;
+   for the gateway, only the admins' own email addresses, with a short session
+   (for example 8 hours). Note each application's *AUD tag*.
+2. **Tunnel routes.** Under *Networks → Tunnels*, open the tunnel and add a
+   public hostname for each row of the table. For the UI and gateway hostnames,
+   open *Additional application settings → Access*, turn on *Protect with
+   Access*, and enter the team name and that application's AUD tag. `cloudflared`
+   then refuses any request without a valid Access token, even if an Access
+   application is later removed by mistake.
+3. **API protection.** The API hostname has no Access application, so that
+   partners can call it with their API key. Add a WAF *rate limiting rule* for
+   that hostname (for example 60 requests per minute per IP), and under
+   *SSL/TLS* use *Full* mode, *Always Use HTTPS* and minimum TLS 1.2.
+
+Then, on the VM:
+
+4. In the env file, keep both bind addresses at `127.0.0.1`.
+5. Onboard partners in the gateway as described in
+   [Partners](#partners); Moose itself needs no change per partner.
+
+## Library use
+
+The `moose` package can call an LLM without the API or the gateway. Keys come
+from your own code, an environment variable, or a callable that reads a keychain
+or secrets manager on every request:
+
+```python
+import keyring
+from moose.llm import OllamaClient, OpenRouterClient
+
+llm = OllamaClient(host="http://localhost:11434", token=None, model="qwen3:8b", timeout=120)
+llm = OpenRouterClient(api_key=lambda: keyring.get_password("moose", "openrouter"),
+                       model="anthropic/claude-sonnet-4.5", timeout=120)
 ```
 
 ## Auth Headers
@@ -89,13 +182,46 @@ uvicorn moose_api.main:app --host 0.0.0.0 --port 8000
 All API calls require:
 - `X-API-Key: <your-key>`
 
-LLM-backed operations also require:
-- `X-LLM-API-Key: <provider-key>` (required for OpenRouter/DeepInfra/DeepSeek; optional for Ollama)
-- optional `X-LLM-Endpoint: <override-url>`
+`MOOSE_API_KEY` is the admin key. Partners use their own LiteLLM virtual key
+as API key (see [Partners](#partners)).
 
-Default provider in this project is typically **OpenRouter**, but you can use any supported provider per request via:
-- `llm.provider`: `openrouter | ollama | deepinfra | deepseek`
-- `llm.model`: provider-specific model name
+## Partners
+
+Each partner is a *team* in the LiteLLM gateway, and uses a virtual key of that
+team as their Moose API key. Moose checks the key with the gateway and runs the
+partner's LLM calls with it, so the gateway decides which models each partner
+sees and enforces their budget.
+
+- **Models.** A partner sees the models allowed on their team: your shared
+  models plus any you add for them. In the free LiteLLM edition only gateway
+  admins can add models; team-private models that partners add themselves need
+  LiteLLM Enterprise. To give a partner a private model, add it with a
+  partner-specific public name (for example `partner-a/<model>`) and allow it
+  on that partner's team only. Other teams cannot see or call it.
+- **Keys.** The partner's key is held only in the memory of the Moose process
+  that accepted the job and is never stored. If Moose restarts before a
+  partner's job finishes, the job fails with a request to submit it again. Run
+  the API as one process (`MOOSE_WEB_CONCURRENCY=1`).
+- **Isolation.** Partners can read jobs of their own team only, cannot change
+  schemas (`/schemas/ingest`, preview, patch, delete, reload) and cannot see
+  admin jobs. Revoking or blocking a key in the gateway locks it out of Moose
+  within a minute.
+- **Moose's own key.** Keep `MOOSE_LLM_API_KEY` limited to the `shared` group,
+  so admin jobs never use (or pay for) a partner's private model.
+
+Give partners keys of type *Default*. Keys of type *LLM API* also work, but the
+gateway does not tell Moose their team, so such a key only sees its own jobs,
+not those of other keys in the same team.
+
+To onboard a partner: create a team whose models are the `shared` group (plus
+any private ones) with a budget, create a virtual key for that team, and give the partner
+the key. With the gateway published behind Cloudflare Access, partners can also
+get their own LiteLLM login as team members to manage their keys and see their
+usage.
+
+Requests never send LLM keys. They may choose one of the models the
+administrator made available (`GET /models`) with `"llm": {"model": "<name>"}`;
+see [LLM gateway](#llm-gateway).
 
 ## Core Usage (curl)
 
@@ -111,11 +237,9 @@ curl -sS "http://localhost:8000/schemas?include_type_count=true" \
 ```bash
 curl -sS -X POST "http://localhost:8000/schemas/coarse/ner" \
   -H "X-API-Key: test-dev-key" \
-  -H "X-LLM-API-Key: <llm-key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Maria Rossi works at Acme in Milan.",
-    "llm": {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
+    "text": "Maria Rossi works at Acme in Milan."
   }'
 ```
 
@@ -124,15 +248,13 @@ curl -sS -X POST "http://localhost:8000/schemas/coarse/ner" \
 ```bash
 curl -sS -X POST "http://localhost:8000/schemas/sti/tabular/annotate" \
   -H "X-API-Key: test-dev-key" \
-  -H "X-LLM-API-Key: <llm-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "table_id":"patients",
     "sampled_rows":[
       {"patient_name":"Alice Smith","email":"alice@example.com","medical_record_number":"MRN-100245"},
       {"patient_name":"Bob Jones","email":"bob@example.com","medical_record_number":"MRN-100246"}
-    ],
-    "llm": {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
+    ]
   }'
 ```
 
@@ -175,7 +297,6 @@ curl -sS -X POST "http://localhost:8000/schemas/ingest" \
 ```bash
 curl -sS -X POST "http://localhost:8000/privacy/analyze" \
   -H "X-API-Key: test-dev-key" \
-  -H "X-LLM-API-Key: <llm-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "profile":"balanced",
@@ -185,19 +306,9 @@ curl -sS -X POST "http://localhost:8000/privacy/analyze" \
         "task_id":"t1",
         "text":"We collect patient names and emails and share with billing processor."
       }
-    ],
-    "llm": {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
+    ]
   }'
 ```
-
-### Provider variants (same payload shape)
-
-Use the same endpoints and payload structure; only change `llm.provider` and `llm.model`.
-
-- OpenRouter (default): `{\"provider\":\"openrouter\",\"model\":\"anthropic/claude-3.5-sonnet\"}`
-- Ollama: `{\"provider\":\"ollama\",\"model\":\"llama3.1:8b\"}`
-- DeepInfra: `{\"provider\":\"deepinfra\",\"model\":\"Qwen/Qwen3-Next-80B-A3B-Instruct\"}`
-- DeepSeek: `{\"provider\":\"deepseek\",\"model\":\"deepseek-chat\"}`
 
 ### 7) Poll a job
 

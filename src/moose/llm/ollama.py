@@ -5,6 +5,7 @@ import asyncio
 import ollama
 
 from moose.llm.base import LLMClient
+from moose.llm.usage import record_llm_call
 
 
 class OllamaClient(LLMClient):
@@ -24,6 +25,11 @@ class OllamaClient(LLMClient):
         )
         if "response" not in data:
             raise RuntimeError("Ollama response missing 'response' field")
+        record_llm_call(
+            model=f"ollama/{self.model}",
+            prompt_tokens=data.get("prompt_eval_count"),
+            completion_tokens=data.get("eval_count"),
+        )
         return data["response"]
 
     async def close(self) -> None:

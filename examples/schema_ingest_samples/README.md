@@ -30,7 +30,6 @@ curl -s -X POST http://localhost:8000/schemas/ingest \
 ```bash
 curl -s -X POST http://localhost:8000/schemas/healthcare_pii/ner \
   -H "X-API-Key: test-dev-key" \
-  -H "X-LLM-API-Key: <YOUR_LLM_KEY>" \
   -H "Content-Type: application/json" \
   -d @examples/schema_ingest_samples/requests/annotate_healthcare_ner.json
 ```

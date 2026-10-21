@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import time
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Security
+from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -14,16 +18,23 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from moose.config import Settings, get_settings
 from moose.ingest import delete_user_schema, preview_schema_payload, update_user_schema_metadata
-from moose.llm import create_client
+from moose.llm import OpenAICompatibleClient, create_client
 from moose.pipelines import load_privacy_profiles
 from moose.schema import get_schema_config, list_schema_names, reload_schema_registry
 from moose.privacy import get_machine_report_json_schema, list_policy_packs
 from moose_api.queue import JobRecord, WorkerPool, build_backends, utc_now
 
 
-class LLMOverrides(BaseModel):
-    provider: Literal["openrouter", "ollama", "deepinfra", "deepseek"]
-    model: str
+class LLMOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str | None = Field(
+        default=None,
+        description=(
+            "One of the models the administrator made available to Moose (see GET /models). "
+            "Defaults to the server's default model."
+        ),
+    )
 
 
 # -----------------------
@@ -32,8 +43,9 @@ class LLMOverrides(BaseModel):
 class BaseNERRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    llm: LLMOptions = Field(default_factory=LLMOptions)
+
     text: str = Field(min_length=1)
-    llm: LLMOverrides
 
     @field_validator("text")
     @classmethod
@@ -67,9 +79,10 @@ class NERRequest(BaseNERRequest):
 class BaseTabularRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    llm: LLMOptions = Field(default_factory=LLMOptions)
+
     table_id: str | None = None
     sampled_rows: list[dict[str, Any]] = Field(min_length=1)
-    llm: LLMOverrides
 
 
 class TabularRequest(BaseTabularRequest):
@@ -96,6 +109,8 @@ class TabularRequest(BaseTabularRequest):
 class BaseCPARequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    llm: LLMOptions = Field(default_factory=LLMOptions)
+
     table_id: str | None = None
     sampled_rows: list[dict[str, Any]] = Field(min_length=1)
     subject_column: str = Field(min_length=1, description="Subject column name (required).")
@@ -118,7 +133,6 @@ class BaseCPARequest(BaseModel):
     debug: bool = False
     debug_preview_limit: int = Field(default=20, ge=0, le=200)
 
-    llm: LLMOverrides
 
     @field_validator("subject_column")
     @classmethod
@@ -182,7 +196,7 @@ class PrivacyAnalyzeRequest(BaseModel):
     include_extraction: bool | None = None
 
     tasks: list[PrivacyTaskIn] = Field(min_length=1)
-    llm: LLMOverrides
+    llm: LLMOptions = Field(default_factory=LLMOptions)
 
 
 # -----------------------
@@ -211,6 +225,8 @@ class DpvTabularRequest(BaseTabularRequest):
 class SchemaIngestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    llm: LLMOptions = Field(default_factory=LLMOptions)
+
     name: str = Field(min_length=1, description="Schema registry name.")
     label: str | None = None
     description: str | None = None
@@ -223,7 +239,6 @@ class SchemaIngestRequest(BaseModel):
     github_path: str | None = None
 
     use_llm_fallback: bool = False
-    llm: LLMOverrides | None = None
 
     score_mode: Literal["dense", "sparse"] = "sparse"
     prefilter_types: bool = False
@@ -303,33 +318,104 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 bearer_scheme = HTTPBearer(auto_error=False)
-llm_api_key_header = APIKeyHeader(
-    name="X-LLM-API-Key",
-    auto_error=False,
-    scheme_name="X-LLM-API-Key",
-    description="Provider API key used by LLM backends (OpenRouter, DeepInfra, DeepSeek, optional for Ollama).",
-)
+
+
+# Two kinds of callers:
+# - admin: MOOSE_API_KEY. Full access; LLM calls use Moose's own gateway key.
+# - partners: their own LiteLLM virtual key. Moose checks it with the gateway, and their
+#   LLM calls use that key, so the gateway decides which models they see and pay for.
+#   The key is kept in memory only, never stored. Partners cannot change schemas and
+#   only see jobs from their own LiteLLM team.
+ADMIN_CLIENT = "admin"
+_LLM_NOT_CONFIGURED = "The LLM is not configured on this server. The administrator must set MOOSE_MODEL."
+_GATEWAY_CACHE_TTL_SECS = 60.0
+
+_current_client: ContextVar[str | None] = ContextVar("moose_api_client", default=None)
+# The caller's own gateway key (partners); None means Moose's key (admin).
+_current_gateway_key: ContextVar[str | None] = ContextVar("moose_gateway_key", default=None)
+
+
+def _key_hash(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _gateway_client(api_key: str | None) -> OpenAICompatibleClient:
+    settings: Settings = app.state.settings
+    return OpenAICompatibleClient(
+        base_url=settings.MOOSE_LLM_BASE_URL,
+        api_key=api_key or settings.MOOSE_LLM_API_KEY,
+        model=settings.MOOSE_MODEL or "",
+        timeout=10.0,
+    )
+
+
+def _cache_get(name: str, key: str) -> Any:
+    entry = app.state.gateway_cache.get((name, _key_hash(key)))
+    if entry and time.monotonic() - entry[0] < _GATEWAY_CACHE_TTL_SECS:
+        return entry[1]
+    return None
+
+
+def _cache_put(name: str, key: str, value: Any) -> None:
+    app.state.gateway_cache[(name, _key_hash(key))] = (time.monotonic(), value)
+
+
+async def _partner_identity(token: str) -> str | None:
+    """Client name for a valid LiteLLM virtual key ("team:<id>"), or None if invalid."""
+    settings: Settings = app.state.settings
+    if settings.MOOSE_LLM_PROVIDER.lower() != "gateway" or not token:
+        return None
+    cached = _cache_get("identity", token)
+    if cached is not None:
+        return cached or None
+    client = _gateway_client(token)
+    identity = ""
+    try:
+        info = await client.key_info()
+        if info is not None:
+            if not info.get("blocked"):
+                team_id = info.get("team_id")
+                identity = f"team:{team_id}" if team_id else f"key:{_key_hash(token)[:16]}"
+        else:
+            # Keys limited to LLM routes ("LLM API" type) may not read /key/info. Such a key
+            # is still valid if it can list its models; it then stands for itself, not its team.
+            try:
+                await client.list_models()
+                identity = f"key:{_key_hash(token)[:16]}"
+            except httpx.HTTPStatusError:
+                identity = ""
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Could not verify the key with the LLM gateway: {exc}") from exc
+    finally:
+        await client.close()
+    _cache_put("identity", token, identity)
+    return identity or None
 
 
 async def require_api_key(
     api_key: str | None = Security(api_key_header),
     bearer: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
-) -> None:
-    expected = app.state.settings.MOOSE_API_KEY
-    if not expected:
+) -> str:
+    admin_key = app.state.settings.MOOSE_API_KEY
+    if not admin_key:
         raise HTTPException(status_code=500, detail="API key not configured")
-    token = api_key or (bearer.credentials if bearer else None)
-    if token != expected:
+    token = api_key or (bearer.credentials if bearer else None) or ""
+    if hmac.compare_digest(token.encode(), admin_key.encode()):
+        _current_client.set(ADMIN_CLIENT)
+        _current_gateway_key.set(None)
+        return ADMIN_CLIENT
+    identity = await _partner_identity(token)
+    if identity is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    _current_client.set(identity)
+    _current_gateway_key.set(token)
+    return identity
 
 
-def _require_llm_overrides(request_llm: LLMOverrides, llm_api_key: str | None) -> None:
-    provider = request_llm.provider.lower()
-    if provider in {"openrouter", "deepinfra", "deepseek"} and not llm_api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="LLM API key is required via X-LLM-API-Key for this provider.",
-        )
+async def require_admin_key(client: str = Depends(require_api_key)) -> str:
+    if client != ADMIN_CLIENT:
+        raise HTTPException(status_code=403, detail="This operation needs the admin API key.")
+    return client
 
 
 def _ensure_schema_supported(
@@ -359,11 +445,12 @@ async def startup() -> None:
 
     job_store, queue_backend, info = await build_backends(settings)
 
-    llm_client = None
-    if settings.MOOSE_LLM_PROVIDER.lower() != "openrouter":
-        llm_client = create_client(settings)
+    # Default model (MOOSE_MODEL). Requests may pick another model the administrator made
+    # available to Moose's gateway key; the gateway enforces that list.
+    llm_client = create_client(settings) if settings.MOOSE_MODEL else None
 
     app.state.settings = settings
+    app.state.gateway_cache = {}
     app.state.job_store = job_store
     app.state.queue_backend = queue_backend
     app.state.queue_info = info
@@ -378,9 +465,6 @@ async def startup() -> None:
 async def shutdown() -> None:
     worker_pool: WorkerPool = app.state.worker_pool
     await worker_pool.stop()
-    llm_client = app.state.llm_client
-    if llm_client is not None:
-        await llm_client.close()
 
     queue_info = app.state.queue_info
     mongo_client = queue_info.get("mongo_client")
@@ -393,12 +477,64 @@ def _new_job_id() -> str:
     return uuid.uuid4().hex
 
 
-async def _enqueue_job(endpoint_type: str, payload: dict):
+async def _available_models() -> list[str]:
+    """Models the caller may use: whatever their gateway key (or Moose's, for admin) allows."""
+    settings: Settings = app.state.settings
+    if not settings.MOOSE_MODEL:
+        raise HTTPException(status_code=503, detail=_LLM_NOT_CONFIGURED)
+    if settings.MOOSE_LLM_PROVIDER.lower() != "gateway":
+        return [settings.MOOSE_MODEL]
+    key = _current_gateway_key.get() or settings.MOOSE_LLM_API_KEY or ""
+    cached = _cache_get("models", key)
+    if cached is not None:
+        return cached
+    client = _gateway_client(key)
+    try:
+        models = await client.list_models()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Could not read the model list from the LLM gateway: {exc}") from exc
+    finally:
+        await client.close()
+    _cache_put("models", key, models)
+    return models
+
+
+def _default_model(models: list[str]) -> str | None:
+    default = app.state.settings.MOOSE_MODEL
+    if default in models:
+        return default
+    return models[0] if models else None
+
+
+async def _resolve_model(requested: str | None) -> str:
+    settings: Settings = app.state.settings
+    if not settings.MOOSE_MODEL:
+        raise HTTPException(status_code=503, detail=_LLM_NOT_CONFIGURED)
+    if settings.MOOSE_LLM_PROVIDER.lower() != "gateway":
+        return settings.MOOSE_MODEL
+    models = await _available_models()
+    model = requested or _default_model(models)
+    if model is None:
+        raise HTTPException(status_code=400, detail="No LLM models are available for this API key.")
+    if model not in models:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{model}' is not available. Choose one of: {', '.join(models)} (see GET /models).",
+        )
+    return model
+
+
+async def _enqueue_job(endpoint_type: str, payload: dict, llm: LLMOptions, needs_llm: bool = True):
     settings: Settings = app.state.settings
     queue_backend = app.state.queue_backend
     job_store = app.state.job_store
 
-    queue_size = await queue_backend.size()
+    if needs_llm:
+        payload["llm"] = {"model": await _resolve_model(llm.model)}
+
+    gateway_key = _current_gateway_key.get()
+    worker_pool = app.state.worker_pool
+    queue_size = await queue_backend.size() + worker_pool.local_queue_size()
     if queue_size >= settings.MOOSE_QUEUE_MAXSIZE:
         raise HTTPException(status_code=429, detail="Queue is full, try again later")
 
@@ -412,10 +548,15 @@ async def _enqueue_job(endpoint_type: str, payload: dict):
         created_at=now,
         updated_at=now,
         retries=0,
+        client=_current_client.get(),
     )
     await job_store.put_job(job)
     try:
-        await queue_backend.enqueue(job_id)
+        if gateway_key:
+            # Partner jobs run in this process, so their key never leaves memory.
+            worker_pool.enqueue_local(job_id, gateway_key)
+        else:
+            await queue_backend.enqueue(job_id)
     except Exception as exc:  # noqa: BLE001
         await job_store.update_job(
             job_id,
@@ -425,64 +566,6 @@ async def _enqueue_job(endpoint_type: str, payload: dict):
         )
         raise HTTPException(status_code=429, detail="Queue is full, try again later")
     return job_id
-
-
-def _build_llm_payload(
-    request_llm: LLMOverrides,
-    llm_api_key: str | None,
-    llm_endpoint: str | None,
-) -> dict[str, Any]:
-    llm_payload = request_llm.model_dump()
-    provider = request_llm.provider.lower()
-
-    if llm_api_key:
-        if provider == "openrouter":
-            llm_payload["openrouter_api_key"] = llm_api_key
-        elif provider == "ollama":
-            llm_payload["ollama_token"] = llm_api_key
-        elif provider == "deepinfra":
-            llm_payload["deepinfra_api_key"] = llm_api_key
-        elif provider == "deepseek":
-            llm_payload["deepseek_api_key"] = llm_api_key
-
-    if llm_endpoint:
-        llm_payload["endpoint"] = llm_endpoint
-
-    return llm_payload
-
-
-def _settings_with_llm_payload(settings: Settings, llm_payload: dict[str, Any]) -> Settings:
-    update: dict[str, Any] = {}
-    provider = str(llm_payload.get("provider") or settings.MOOSE_LLM_PROVIDER).lower()
-
-    if llm_payload.get("provider"):
-        update["MOOSE_LLM_PROVIDER"] = provider
-    if llm_payload.get("model"):
-        update["MOOSE_MODEL"] = llm_payload["model"]
-
-    if llm_payload.get("ollama_token"):
-        update["MOOSE_OLLAMA_TOKEN"] = llm_payload["ollama_token"]
-    if llm_payload.get("openrouter_api_key"):
-        update["MOOSE_OPENROUTER_API_KEY"] = llm_payload["openrouter_api_key"]
-    if llm_payload.get("deepinfra_api_key"):
-        update["MOOSE_DEEPINFRA_API_KEY"] = llm_payload["deepinfra_api_key"]
-    if llm_payload.get("deepseek_api_key"):
-        update["MOOSE_DEEPSEEK_API_KEY"] = llm_payload["deepseek_api_key"]
-
-    endpoint = llm_payload.get("endpoint")
-    if endpoint:
-        if provider == "openrouter":
-            update["MOOSE_OPENROUTER_BASE_URL"] = endpoint
-        elif provider == "ollama":
-            update["MOOSE_OLLAMA_HOST"] = endpoint
-        elif provider == "deepinfra":
-            update["MOOSE_DEEPINFRA_BASE_URL"] = endpoint
-        elif provider == "deepseek":
-            update["MOOSE_DEEPSEEK_BASE_URL"] = endpoint
-
-    if not update:
-        return settings
-    return settings.model_copy(update=update)
 
 
 def _validate_schema_ingest_request(request: SchemaIngestRequest) -> None:
@@ -528,18 +611,14 @@ def _build_schema_ingest_payload(request: SchemaIngestRequest) -> dict[str, Any]
 @app.post("/ner", dependencies=[Depends(require_api_key)], tags=["NER"], response_model=JobQueuedResponse)
 async def submit_ner(
     request: NERRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported(request.schema_name, require_text=True)
 
     payload = {
         "schema": request.schema_name,
         "text": request.text,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("ner", payload)
+    job_id = await _enqueue_job("ner", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
@@ -547,36 +626,28 @@ async def submit_ner(
 async def submit_schema_ner(
     schema: str,
     request: SchemaNERRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported(schema, require_text=True)
 
     payload = {
         "schema": schema,
         "text": request.text,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("ner", payload)
+    job_id = await _enqueue_job("ner", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
 @app.post("/dpv/ner", dependencies=[Depends(require_api_key)], tags=["DPV"], response_model=JobQueuedResponse, deprecated=True)
 async def submit_dpv_ner(
     request: DpvNERRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported("dpv", require_text=True)
 
     payload = {
         "schema": "dpv",
         "text": request.text,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("ner", payload)
+    job_id = await _enqueue_job("ner", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
@@ -586,19 +657,15 @@ async def submit_dpv_ner(
 @app.post("/tabular/annotate", dependencies=[Depends(require_api_key)], tags=["Tabular"], response_model=JobQueuedResponse)
 async def submit_tabular(
     request: TabularRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported(request.schema_name, require_table=True)
 
     payload = {
         "schema": request.schema_name,
         "table_id": request.table_id,
         "sampled_rows": request.sampled_rows,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("tabular", payload)
+    job_id = await _enqueue_job("tabular", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
@@ -606,38 +673,30 @@ async def submit_tabular(
 async def submit_schema_tabular(
     schema: str,
     request: SchemaTabularRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported(schema, require_table=True)
 
     payload = {
         "schema": schema,
         "table_id": request.table_id,
         "sampled_rows": request.sampled_rows,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("tabular", payload)
+    job_id = await _enqueue_job("tabular", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
 @app.post("/dpv/tabular/annotate", dependencies=[Depends(require_api_key)], tags=["DPV"], response_model=JobQueuedResponse, deprecated=True)
 async def submit_dpv_tabular(
     request: DpvTabularRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported("dpv", require_table=True)
 
     payload = {
         "schema": "dpv",
         "table_id": request.table_id,
         "sampled_rows": request.sampled_rows,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("tabular", payload)
+    job_id = await _enqueue_job("tabular", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
@@ -647,10 +706,7 @@ async def submit_dpv_tabular(
 @app.post("/tabular/cpa", dependencies=[Depends(require_api_key)], tags=["CPA"], response_model=JobQueuedResponse)
 async def submit_tabular_cpa(
     request: CPARequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported(request.schema_name, require_cpa=True)
 
     payload = {
@@ -663,9 +719,8 @@ async def submit_tabular_cpa(
         "use_sti_signature_cache": request.use_sti_signature_cache,
         "debug": request.debug,
         "debug_preview_limit": request.debug_preview_limit,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("cpa", payload)
+    job_id = await _enqueue_job("cpa", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
@@ -673,10 +728,7 @@ async def submit_tabular_cpa(
 async def submit_schema_tabular_cpa(
     schema: str,
     request: SchemaCPARequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
-    _require_llm_overrides(request.llm, llm_api_key)
     _ensure_schema_supported(schema, require_cpa=True)
 
     payload = {
@@ -689,9 +741,8 @@ async def submit_schema_tabular_cpa(
         "use_sti_signature_cache": request.use_sti_signature_cache,
         "debug": request.debug,
         "debug_preview_limit": request.debug_preview_limit,
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("cpa", payload)
+    job_id = await _enqueue_job("cpa", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
@@ -701,14 +752,11 @@ async def submit_schema_tabular_cpa(
 @app.post("/privacy/analyze", dependencies=[Depends(require_api_key)], tags=["Privacy"], response_model=JobQueuedResponse)
 async def submit_privacy_analyze(
     request: PrivacyAnalyzeRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
     """
     NOTE: We do not validate text_schema/table_schema/scan_schema here anymore,
     because they can be omitted and resolved by `profile` defaults in moose/privacy.py.
     """
-    _require_llm_overrides(request.llm, llm_api_key)
 
     payload = {
         "profile": request.profile,
@@ -719,73 +767,48 @@ async def submit_privacy_analyze(
         "scan_schema": request.scan_schema,
         "include_extraction": request.include_extraction,
         "tasks": [t.model_dump() for t in request.tasks],
-        "llm": _build_llm_payload(request.llm, llm_api_key, llm_endpoint),
     }
-    job_id = await _enqueue_job("privacy_analyze", payload)
+    job_id = await _enqueue_job("privacy_analyze", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
-@app.post("/schemas/ingest", dependencies=[Depends(require_api_key)], tags=["Schemas"], response_model=JobQueuedResponse)
+@app.post("/schemas/ingest", dependencies=[Depends(require_admin_key)], tags=["Schemas"], response_model=JobQueuedResponse)
 async def submit_schema_ingest(
     request: SchemaIngestRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
     _validate_schema_ingest_request(request)
 
-    llm_payload: dict[str, Any] | None = None
-    if request.llm is not None:
-        _require_llm_overrides(request.llm, llm_api_key)
-        llm_payload = _build_llm_payload(request.llm, llm_api_key, llm_endpoint)
-    elif request.use_llm_fallback:
-        raise HTTPException(status_code=400, detail="llm is required when use_llm_fallback=true.")
-
     payload = _build_schema_ingest_payload(request)
-    if llm_payload:
-        payload["llm"] = llm_payload
-
-    job_id = await _enqueue_job("schema_ingest", payload)
+    job_id = await _enqueue_job("schema_ingest", payload, request.llm, needs_llm=request.use_llm_fallback)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
 @app.post(
     "/schemas/ingest/preview",
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_key)],
     tags=["Schemas"],
     response_model=SchemaIngestPreviewResponse,
 )
 async def preview_schema_ingest(
     request: SchemaIngestRequest,
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
 ):
     _validate_schema_ingest_request(request)
 
-    llm_payload: dict[str, Any] | None = None
-    if request.llm is not None:
-        _require_llm_overrides(request.llm, llm_api_key)
-        llm_payload = _build_llm_payload(request.llm, llm_api_key, llm_endpoint)
-    elif request.use_llm_fallback:
-        raise HTTPException(status_code=400, detail="llm is required when use_llm_fallback=true.")
+    llm_client = None
+    if request.use_llm_fallback:
+        llm_client = app.state.worker_pool.client_for(await _resolve_model(request.llm.model))
 
     payload = _build_schema_ingest_payload(request)
-    llm_client = None
     try:
-        if llm_payload:
-            settings = _settings_with_llm_payload(app.state.settings, llm_payload)
-            llm_client = create_client(settings)
         preview = await preview_schema_payload(payload, llm_client=llm_client)
         return SchemaIngestPreviewResponse.model_validate(preview)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    finally:
-        if llm_client is not None:
-            await llm_client.close()
 
 
-@app.patch("/schemas/{schema_name}", dependencies=[Depends(require_api_key)], tags=["Schemas"])
+@app.patch("/schemas/{schema_name}", dependencies=[Depends(require_admin_key)], tags=["Schemas"])
 async def patch_user_schema(schema_name: str, request: SchemaPatchRequest) -> dict[str, Any]:
     updates = request.model_dump()
     if not any(value is not None for value in updates.values()):
@@ -798,7 +821,7 @@ async def patch_user_schema(schema_name: str, request: SchemaPatchRequest) -> di
         raise HTTPException(status_code=status, detail=detail) from exc
 
 
-@app.delete("/schemas/{schema_name}", dependencies=[Depends(require_api_key)], tags=["Schemas"])
+@app.delete("/schemas/{schema_name}", dependencies=[Depends(require_admin_key)], tags=["Schemas"])
 async def delete_schema(schema_name: str, remove_files: bool = True) -> dict[str, Any]:
     try:
         result = delete_user_schema(schema_name, remove_files=remove_files)
@@ -812,12 +835,18 @@ async def delete_schema(schema_name: str, remove_files: bool = True) -> dict[str
 # ----------
 # Metadata / jobs
 # ----------
+async def _get_visible_job(job_id: str) -> JobRecord:
+    job = await app.state.job_store.get_job(job_id)
+    client = _current_client.get()
+    # Partners only see their own jobs; jobs from before per-client keys belong to admin.
+    if not job or (client != ADMIN_CLIENT and (job.client or ADMIN_CLIENT) != client):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
 @app.get("/jobs/{job_id}", dependencies=[Depends(require_api_key)], tags=["Metadata"])
 async def get_job(job_id: str):
-    job_store = app.state.job_store
-    job = await job_store.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = await _get_visible_job(job_id)
 
     response = {
         "job_id": job.job_id,
@@ -825,6 +854,8 @@ async def get_job(job_id: str):
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
+    if job.llm:
+        response["llm"] = job.llm
     if job.status == "completed":
         response["result"] = job.result
     if job.status == "failed":
@@ -834,10 +865,7 @@ async def get_job(job_id: str):
 
 @app.get("/jobs/{job_id}/privacy-report", dependencies=[Depends(require_api_key)], tags=["Metadata"])
 async def get_job_privacy_report(job_id: str) -> dict[str, Any]:
-    job_store = app.state.job_store
-    job = await job_store.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = await _get_visible_job(job_id)
     if job.status != "completed":
         raise HTTPException(status_code=409, detail=f"Job is not completed (status={job.status}).")
 
@@ -881,7 +909,7 @@ async def list_schemas(include_type_count: bool = False) -> dict[str, Any]:
     return {"schemas": schemas}
 
 
-@app.post("/schemas/reload", dependencies=[Depends(require_api_key)], tags=["Metadata"])
+@app.post("/schemas/reload", dependencies=[Depends(require_admin_key)], tags=["Metadata"])
 async def reload_schemas() -> dict[str, Any]:
     names = reload_schema_registry()
     return {"status": "ok", "schema_count": len(names), "schemas": names}
@@ -916,15 +944,6 @@ async def health():
         "worker_count": settings.MOOSE_WORKER_COUNT,
         "queue_backend": queue_info.get("queue_backend"),
     }
-
-
-def _parse_price(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _load_user_schema_assets(data_dir: Path) -> list[dict[str, Any]]:
@@ -995,84 +1014,10 @@ def _load_user_schema_assets(data_dir: Path) -> list[dict[str, Any]]:
 
 
 @app.get("/models", dependencies=[Depends(require_api_key)], tags=["Metadata"])
-async def list_models(
-    provider: Literal["ollama", "openrouter", "deepinfra", "deepseek", "all"] = "openrouter",
-    llm_api_key: str | None = Security(llm_api_key_header),
-    llm_endpoint: str | None = Header(default=None, alias="X-LLM-Endpoint"),
-):
-    """
-    List available models from specified provider(s).
-
-    Notes:
-    - OpenRouter: supported via /models
-    - Ollama: supported via /api/tags
-    - DeepInfra/DeepSeek: model listing is not currently supported by Moose (provide model name manually)
-    """
-    settings: Settings = app.state.settings
-    results: dict[str, Any] = {}
-
-    if provider in {"deepinfra", "all"}:
-        results["deepinfra"] = {
-            "error": "Model listing is not supported for DeepInfra in this API. Provide model manually (e.g. Qwen/Qwen3-Next-80B-A3B-Instruct)."
-        }
-
-    if provider in {"deepseek", "all"}:
-        results["deepseek"] = {
-            "error": "Model listing is not supported for DeepSeek in this API. Provide model manually (e.g. deepseek-chat)."
-        }
-
-    if provider in {"ollama", "all"}:
-        headers = {}
-        if llm_api_key:
-            headers["Authorization"] = f"Bearer {llm_api_key}"
-
-        base_url = settings.MOOSE_OLLAMA_HOST
-        if provider == "ollama" and llm_endpoint:
-            base_url = llm_endpoint
-
-        try:
-            async with httpx.AsyncClient(base_url=base_url, timeout=settings.MOOSE_TIMEOUT_SECS) as client:
-                resp = await client.get("/api/tags", headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            models = [item.get("name") for item in data.get("models", []) if item.get("name")]
-            results["ollama"] = {"models": models}
-        except Exception as exc:  # noqa: BLE001
-            results["ollama"] = {"error": str(exc)}
-
-    if provider in {"openrouter", "all"}:
-        if not llm_api_key:
-            results["openrouter"] = {"error": "OpenRouter API key is required"}
-        else:
-            try:
-                base_url = settings.MOOSE_OPENROUTER_BASE_URL
-                if provider == "openrouter" and llm_endpoint:
-                    base_url = llm_endpoint
-
-                headers = {"Authorization": f"Bearer {llm_api_key}"}
-                async with httpx.AsyncClient(base_url=base_url, timeout=settings.MOOSE_TIMEOUT_SECS) as client:
-                    resp = await client.get("/models", headers=headers)
-                    resp.raise_for_status()
-                    data = resp.json()
-
-                free_models = []
-                for item in data.get("data", []):
-                    pricing = item.get("pricing", {})
-                    prompt_price = _parse_price(pricing.get("prompt"))
-                    completion_price = _parse_price(pricing.get("completion"))
-                    if prompt_price == 0 and completion_price == 0:
-                        free_models.append(
-                            {
-                                "id": item.get("id"),
-                                "name": item.get("name"),
-                                "context_length": item.get("context_length"),
-                            }
-                        )
-                results["openrouter"] = {"models": free_models}
-            except Exception as exc:  # noqa: BLE001
-                results["openrouter"] = {"error": str(exc)}
-
-    return results
+async def list_models() -> dict[str, Any]:
+    """Models this API key may use (set up by the administrator or the caller's LiteLLM team)."""
+    models = await _available_models()
+    return {"default_model": _default_model(models), "models": models}
 
 
 @app.get("/assets", dependencies=[Depends(require_api_key)], tags=["Metadata"])

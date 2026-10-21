@@ -7,7 +7,7 @@ from typing import Any
 import streamlit as st
 
 from moose_ui.api import api_post, wait_for_job
-from moose_ui.config import build_llm_headers, sidebar, validate_common
+from moose_ui.config import llm_options, sidebar, validate_common
 from moose_ui.metadata import clear_metadata_caches, fetch_schemas
 from moose_ui.render import render_job
 from moose_ui.state import add_job_history
@@ -125,8 +125,8 @@ def _build_payload(
         payload["table_intro"] = table_intro.strip()
     if cpa_intro.strip():
         payload["cpa_intro"] = cpa_intro.strip()
-    if use_llm_fallback:
-        payload["llm"] = {"provider": cfg["provider"], "model": cfg["model"]}
+    if use_llm_fallback and llm_options(cfg):
+        payload["llm"] = llm_options(cfg)
     if expected_source_sha256:
         payload["expected_source_sha256"] = expected_source_sha256
     if expected_mapping_sha256:
@@ -145,7 +145,6 @@ if not cfg.get("api_key"):
     st.info("Enter your Moose API key in the sidebar.")
     st.stop()
 
-st.caption(f"Provider: {cfg['provider']} | Model: {cfg['model']}")
 st.caption("Workflow: preview mapping and extracted types first, then activate schema.")
 
 presets = _load_request_presets()
@@ -248,7 +247,7 @@ with action_left:
                 cfg["api_key"],
                 "/schemas/ingest/preview",
                 payload,
-                build_llm_headers(cfg),
+                {},
             )
         except Exception as exc:  # noqa: BLE001
             st.error(str(exc))
@@ -298,7 +297,7 @@ with action_right:
                 cfg["api_key"],
                 "/schemas/ingest",
                 activate_payload,
-                build_llm_headers(cfg),
+                {},
             )
         except Exception as exc:  # noqa: BLE001
             st.error(str(exc))

@@ -1,8 +1,3 @@
 {
-  "text": "Patient Alice Johnson (MRN 734992) can be reached at alice.johnson@example.com, phone +1-202-555-0199, born 1988-04-12.",
-  "llm": {
-    "provider": "openrouter",
-    "model": "anthropic/claude-3.5-sonnet"
-  }
+  "text": "Patient Alice Johnson (MRN 734992) can be reached at alice.johnson@example.com, phone +1-202-555-0199, born 1988-04-12."
 }
-

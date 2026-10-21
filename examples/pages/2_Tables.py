@@ -5,7 +5,7 @@ from typing import Any
 
 import streamlit as st
 
-from moose_ui.config import build_llm_headers, sidebar, validate_common
+from moose_ui.config import sidebar, validate_common
 from moose_ui.metadata import clear_metadata_caches, fetch_schemas, schemas_supporting
 from moose_ui.samples import DEFAULT_CPA_TABLE_SAMPLE, DEFAULT_TABLE_SAMPLE
 from moose_ui.submit import submit_and_render_job
@@ -37,7 +37,6 @@ if not cfg.get("api_key"):
     st.info("Enter your Moose API key in the sidebar.")
     st.stop()
 
-st.caption(f"Provider: {cfg['provider']} | Model: {cfg['model']}")
 if st.button("Refresh schema list", key="tables_refresh_schemas"):
     clear_metadata_caches()
     st.rerun()
@@ -110,14 +109,13 @@ if operation == "Column typing":
         payload = {
             "table_id": table_id,
             "sampled_rows": sampled_rows,
-            "llm": {"provider": cfg["provider"], "model": cfg["model"]},
         }
 
         submit_and_render_job(
             cfg=cfg,
             path=f"/schemas/{schema}/tabular/annotate",
             payload=payload,
-            headers=build_llm_headers(cfg),
+            headers={},
             label=f"Tabular typing ({schema})",
             auto_poll=auto_poll,
         )
@@ -179,7 +177,6 @@ else:
             "subject_column": subject_column,
             "debug": debug_flag,
             "use_sti_signature_cache": use_sti_signature_cache,
-            "llm": {"provider": cfg["provider"], "model": cfg["model"]},
         }
 
         if subject_class:
@@ -191,7 +188,7 @@ else:
             cfg=cfg,
             path=f"/schemas/{schema}/tabular/cpa",
             payload=payload,
-            headers=build_llm_headers(cfg),
+            headers={},
             label=f"CPA ({schema})",
             auto_poll=auto_poll,
         )

@@ -22,6 +22,16 @@ def render_job(job: dict[str, Any], *, show_raw: bool, show_legal_refs: bool, sh
         f"**created_at:** `{job.get('created_at', '')}`  \n"
         f"**updated_at:** `{job.get('updated_at', '')}`"
     )
+    llm = job.get("llm") or {}
+    if llm:
+        used = ", ".join(llm.get("models_used") or []) or "none"
+        cost = llm.get("cost_usd")
+        st.caption(
+            f"Model: {llm.get('requested_model')} → {used} · {llm.get('calls', 0)} calls · "
+            f"{llm.get('prompt_tokens', 0)} + {llm.get('completion_tokens', 0)} tokens"
+            + (f" · ${cost:.6f}" if cost is not None else "")
+            + (f" · {llm['fallbacks']} fallback(s)" if llm.get("fallbacks") else "")
+        )
 
     if job.get("status") == "failed":
         st.error(job.get("error") or "Job failed (no error message).")
@@ -173,7 +183,10 @@ def render_text_ner_result(result: dict[str, Any], *, show_raw: bool) -> None:
             st.dataframe(
                 df.style.apply(
                     lambda r: [
-                        f"background-color: {_group_color(str(r.get('type_group', 'other')))}"
+                        # Fixed dark text: the theme's text colour is near-white in dark mode,
+                        # which is unreadable on these pastel backgrounds.
+                        f"background-color: {_group_color(str(r.get('type_group', 'other')))}; "
+                        "color: #1f2328; font-weight: 600"
                         if c in {"type_id", "type_group"}
                         else ""
                         for c in df.columns

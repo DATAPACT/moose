@@ -8,5 +8,6 @@ __pycache__/
 .vscode/
 .DS_Store
 data/mongo/
+data/litellm-postgres/
 data/moose-user/
 data/user_vocabularies.json
