@@ -1,6 +1,7 @@
 # Design: partner-owned LLM keys in hosted Moose
 
-Status: proposal, for review. Nothing here is implemented yet.
+Status: phases 1 (vault and tokens) and 2 (Keycloak accounts and dashboard)
+implemented; phases 3 and 4 open.
 
 ## Goal
 

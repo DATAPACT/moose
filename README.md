@@ -229,6 +229,34 @@ More: `GET /vault/me`, `POST /vault/tokens` (one token per script or machine),
 with the recovery code. Losing every token and the recovery code makes the
 vault unreadable, by design.
 
+### Account login (Keycloak)
+
+With account login configured, users log in to the dashboard with their
+Keycloak account instead of using an invitation. The **Account** page creates
+their vault on first login (showing the first API token and recovery code
+once), unlocks it with a token or the recovery code, and manages provider keys
+and tokens. For OpenRouter keys it offers OpenRouter's model catalogue with
+prices. Moose verifies each login token itself (signature, issuer, expiry,
+client and the `moose-user` role) and links one vault to each account.
+
+Production, with an existing Keycloak:
+
+1. Create the realm from [`deploy/keycloak/moose-realm.json`](deploy/keycloak/moose-realm.json),
+   changing the client's redirect URI and web origin to the dashboard's public
+   URL (for example `https://moose-ui.example.org/oauth2callback`), and set a
+   client secret.
+2. Create users and give them the realm role `moose-user`.
+3. In the env file set `MOOSE_OIDC_ISSUER` (for example
+   `https://keycloak.example.org/realms/moose`), `MOOSE_DASHBOARD_URL`,
+   `MOOSE_DASHBOARD_OIDC_METADATA_URL` (the issuer plus
+   `/.well-known/openid-configuration`), `MOOSE_DASHBOARD_OIDC_CLIENT_ID`,
+   `MOOSE_DASHBOARD_OIDC_CLIENT_SECRET` and a random
+   `MOOSE_DASHBOARD_COOKIE_SECRET`, then rerun `./scripts/deploy.sh`.
+
+Locally, `./scripts/dev_keycloak.sh` starts a stand-in Keycloak on
+`http://localhost:8180` with this realm and a test user, and writes the
+settings to `.env` (the test login goes to `data/dev-keycloak.txt`).
+
 - **During a job** the user's provider key is decrypted in memory only, in the
   process that accepted the job. If Moose restarts first, the job fails with a
   request to submit it again. Run the API as one process

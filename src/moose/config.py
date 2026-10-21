@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     MOOSE_OPENROUTER_API_KEY: str | None = None
     MOOSE_OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
+    # Account provider (Keycloak) for the dashboard login. Unset = no account login;
+    # invitations still work.
+    MOOSE_OIDC_ISSUER: str | None = None
+    # Where Moose fetches the signing keys, if different from the issuer's URL
+    # (for example from inside Docker).
+    MOOSE_OIDC_JWKS_URL: str | None = None
+    # Clients (comma-separated) whose tokens are accepted, e.g. the dashboard.
+    MOOSE_OIDC_CLIENT_IDS: str = "moose-dashboard"
+    # Realm role an account needs to get a vault.
+    MOOSE_OIDC_USER_ROLE: str = "moose-user"
+
     MOOSE_MONGO_URL: str | None = None
     MOOSE_MONGO_DB: str = "moose"
     MOOSE_MONGO_TIMEOUT_SECS: float = 2.0

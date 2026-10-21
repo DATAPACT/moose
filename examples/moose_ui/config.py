@@ -21,8 +21,8 @@ def sidebar() -> dict[str, Any]:
 
     st.sidebar.divider()
     st.sidebar.header("LLM")
-    # Only models the administrator made available to Moose are offered.
-    model = _model_picker(base_url, api_key)
+    # Shared models set up by the administrator, plus the user's own provider keys.
+    model, key_id = _model_picker(base_url, api_key)
 
     st.sidebar.divider()
     st.sidebar.header("UI")
@@ -43,6 +43,7 @@ def sidebar() -> dict[str, Any]:
             "base_url": base_url,
             "api_key": api_key,
             "model": model,
+            "key_id": key_id,
             "developer_mode": developer_mode,
             "auto_poll_default": auto_poll_default,
             "advanced_mode": advanced_mode,
@@ -57,6 +58,7 @@ def sidebar() -> dict[str, Any]:
         "base_url": base_url,
         "api_key": api_key,
         "model": model,
+        "key_id": key_id,
         "developer_mode": developer_mode,
         "auto_poll_default": auto_poll_default,
         "advanced_mode": advanced_mode,
@@ -67,24 +69,55 @@ def sidebar() -> dict[str, Any]:
     }
 
 
-def _model_picker(base_url: str, api_key: str) -> str:
+def _model_picker(base_url: str, api_key: str) -> tuple[str, str]:
+    """(model, key_id). key_id is set when the user runs on one of their own provider keys."""
+    from .account import model_label, openrouter_catalogue
     from .metadata import fetch_models
 
     if not api_key:
         st.sidebar.caption("Enter your API key to see the available models.")
-        return ""
+        return "", ""
     try:
         data = fetch_models(base_url, api_key)
     except Exception as exc:  # noqa: BLE001
         st.sidebar.caption(f"Could not list models: {exc}")
-        return ""
-    models = list(data.get("models") or [])
-    default = data.get("default_model") or ""
-    if not models:
-        return ""
-    current = st.session_state.get("model") or default
-    index = models.index(current) if current in models else 0
-    return st.sidebar.selectbox("Model", models, index=index, help=f"Default: {default}")
+        return "", ""
+    shared = list(data.get("models") or [])
+    own_keys = list(data.get("own_keys") or [])
+    sources = [{"kind": "shared", "model": m} for m in shared] + [{"kind": "key", "key": k} for k in own_keys]
+    if not sources:
+        return "", ""
+
+    def label(source: dict[str, Any]) -> str:
+        if source["kind"] == "shared":
+            return f"{source['model']} (shared)"
+        key = source["key"]
+        return f"🔑 {key['label']} ({key['provider']})"
+
+    current = st.session_state.get("key_id") or st.session_state.get("model") or data.get("default_model")
+    index = next(
+        (i for i, s in enumerate(sources) if current in (s.get("model"), s.get("key", {}).get("key_id"))), 0
+    )
+    source = st.sidebar.selectbox("Model", sources, index=index, format_func=label)
+    if source["kind"] == "shared":
+        return source["model"], ""
+
+    key = source["key"]
+    default = key.get("default_model") or ""
+    if key["provider"] == "openrouter":
+        try:
+            catalogue = openrouter_catalogue()
+            ids = [m["id"] for m in catalogue]
+            chosen = st.sidebar.selectbox(
+                "Model on your key (type to search)",
+                catalogue,
+                index=ids.index(default) if default in ids else 0,
+                format_func=model_label,
+            )
+            return chosen["id"], key["key_id"]
+        except Exception as exc:  # noqa: BLE001
+            st.sidebar.caption(f"Could not load OpenRouter's model list: {exc}")
+    return st.sidebar.text_input("Model on your key", value=default).strip(), key["key_id"]
 
 
 def validate_common(cfg: dict[str, Any]) -> str | None:
@@ -94,4 +127,7 @@ def validate_common(cfg: dict[str, Any]) -> str | None:
 
 
 def llm_options(cfg: dict[str, Any]) -> dict[str, str]:
-    return {"model": cfg["model"]} if cfg.get("model") else {}
+    options = {"model": cfg["model"]} if cfg.get("model") else {}
+    if cfg.get("key_id"):
+        options["key_id"] = cfg["key_id"]
+    return options

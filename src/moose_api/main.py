@@ -21,6 +21,7 @@ from moose.pipelines import load_privacy_profiles
 from moose.schema import get_schema_config, list_schema_names, reload_schema_registry
 from moose.privacy import get_machine_report_json_schema, list_policy_packs
 from moose.vault import VaultError
+from moose_api.oidc import OIDCError, OIDCVerifier
 from moose_api.queue import JobRecord, WorkerPool, build_backends, utc_now
 from moose_api.vault_store import PROVIDERS, ProviderRoute, Unlocked, VaultStore
 
@@ -424,6 +425,16 @@ async def startup() -> None:
 
     app.state.settings = settings
     app.state.vault = vault_store
+    app.state.oidc = (
+        OIDCVerifier(
+            issuer=settings.MOOSE_OIDC_ISSUER,
+            jwks_url=settings.MOOSE_OIDC_JWKS_URL,
+            client_ids=[c.strip() for c in settings.MOOSE_OIDC_CLIENT_IDS.split(",") if c.strip()],
+            required_role=settings.MOOSE_OIDC_USER_ROLE or None,
+        )
+        if settings.MOOSE_OIDC_ISSUER
+        else None
+    )
     app.state.model_cache = None
     app.state.job_store = job_store
     app.state.queue_backend = queue_backend
@@ -1047,6 +1058,44 @@ class ProviderKeyRequest(BaseModel):
     api_key: str = Field(min_length=8, repr=False)
     label: str = Field(min_length=1, max_length=100)
     default_model: str | None = Field(default=None, description="Model used when a job names this key but no model.")
+
+
+async def require_account(
+    bearer: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
+) -> dict[str, Any]:
+    """Claims of a verified account login token (Keycloak access token)."""
+    verifier: OIDCVerifier | None = app.state.oidc
+    if verifier is None:
+        raise HTTPException(status_code=404, detail="Account login is not configured on this server.")
+    if bearer is None:
+        raise HTTPException(status_code=401, detail="Missing login token.")
+    try:
+        return await verifier.verify(bearer.credentials)
+    except OIDCError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+def _account_name(claims: dict[str, Any]) -> str:
+    return str(claims.get("name") or claims.get("preferred_username") or claims.get("email") or claims["sub"])
+
+
+@app.get("/account", tags=["Vault"])
+async def get_account(claims: dict[str, Any] = Depends(require_account)) -> dict[str, Any]:
+    """The logged-in account and whether it already has a vault."""
+    found = await app.state.vault.find_account(claims["sub"])
+    return {"name": _account_name(claims), "email": claims.get("email"), "has_vault": found is not None} | (
+        {"user_id": found["user_id"]} if found else {}
+    )
+
+
+@app.post("/account/vault", tags=["Vault"])
+async def create_account_vault(claims: dict[str, Any] = Depends(require_account)) -> dict[str, str]:
+    """Create the logged-in account's vault. Returns the first API token and the recovery
+    code, each shown only once; Moose stores neither."""
+    try:
+        return await app.state.vault.create_account_vault(claims["sub"], _account_name(claims))
+    except VaultError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/admin/invites", dependencies=[Depends(require_admin_key)], tags=["Vault"])

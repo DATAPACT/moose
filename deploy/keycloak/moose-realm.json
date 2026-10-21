@@ -1,0 +1,38 @@
+{
+  "realm": "moose",
+  "enabled": true,
+  "displayName": "Moose",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "name": "moose-user",
+        "description": "May create a Moose vault and bring their own LLM provider keys."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "moose-dashboard",
+      "name": "Moose dashboard",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": ["http://localhost:8502/oauth2callback"],
+      "webOrigins": ["http://localhost:8502"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8502/*"
+      }
+    }
+  ]
+}

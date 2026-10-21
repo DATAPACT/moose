@@ -115,6 +115,9 @@ class VaultStore:
     async def mongo(cls, db) -> "VaultStore":
         await db["vault_tokens"].create_index("hash", unique=True)
         await db["vault_users"].create_index("recovery_hash", unique=True)
+        await db["vault_users"].create_index(
+            "oidc_sub", unique=True, partialFilterExpression={"oidc_sub": {"$type": "string"}}
+        )
         await db["vault_secrets"].create_index("user_id")
         return cls(
             MongoCollection(db["vault_users"]),
@@ -138,7 +141,19 @@ class VaultStore:
         if not invite or invite.get("used_at") or invite["expires_at"] < _now():
             raise vault.VaultError("Invitation is invalid, used or expired.")
         await self.invites.update_one({"_id": invite["_id"]}, {"$set": {"used_at": _now()}})
+        return await self._create_vault(name, oidc_sub=None)
 
+    async def find_account(self, oidc_sub: str) -> dict[str, Any] | None:
+        user = await self.users.find_one({"oidc_sub": oidc_sub})
+        return {"user_id": user["_id"], "name": user["name"], "created_at": user["created_at"]} if user else None
+
+    async def create_account_vault(self, oidc_sub: str, name: str) -> dict[str, str]:
+        """The vault of a logged-in account (one per account), created on first login."""
+        if await self.users.find_one({"oidc_sub": oidc_sub}):
+            raise vault.VaultError("This account already has a vault. Unlock it with an API token or the recovery code.")
+        return await self._create_vault(name, oidc_sub=oidc_sub)
+
+    async def _create_vault(self, name: str, oidc_sub: str | None) -> dict[str, str]:
         user_id = _new_id()
         data_key = vault.new_data_key()
         recovery_code = vault.new_recovery_code()
@@ -149,6 +164,7 @@ class VaultStore:
                 "created_at": _now(),
                 "recovery_hash": vault.credential_hash(recovery_code),
                 "recovery_wrapped": vault.wrap_data_key(data_key, recovery_code),
+                "oidc_sub": oidc_sub,
             }
         )
         token = await self._add_token(user_id, data_key, "first token")
