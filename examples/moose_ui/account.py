@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -10,16 +11,33 @@ import streamlit as st
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 
+def auth_enabled() -> bool:
+    """MOOSE_AUTH_ENABLED=false: no login (local development); the API treats every
+    dashboard visitor as the local developer, with the user and admin roles."""
+    return os.getenv("MOOSE_AUTH_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off")
+
+
 def login_configured() -> bool:
+    if not auth_enabled():
+        return True
     try:
         return "auth" in st.secrets
     except Exception:  # noqa: BLE001 - no secrets file at all
         return False
 
 
+def logged_in() -> bool:
+    return not auth_enabled() or st.user.is_logged_in
+
+
+def auth_disabled_banner() -> None:
+    if not auth_enabled():
+        st.error("Login is disabled (MOOSE_AUTH_ENABLED=false): local development only, never on a server.")
+
+
 def access_token() -> str | None:
     """The logged-in account's access token, passed to the Moose API, which verifies it."""
-    if not login_configured() or not st.user.is_logged_in:
+    if not auth_enabled() or not login_configured() or not st.user.is_logged_in:
         return None
     try:
         return st.user.tokens["access"]
@@ -28,9 +46,8 @@ def access_token() -> str | None:
 
 
 def account_request(method: str, base_url: str, path: str) -> httpx.Response:
-    token = access_token() or ""
     with httpx.Client(timeout=30.0) as client:
-        return client.request(method, f"{base_url.rstrip('/')}{path}", headers={"Authorization": f"Bearer {token}"})
+        return client.request(method, f"{base_url.rstrip('/')}{path}", headers=admin_headers())
 
 
 def admin_headers() -> dict[str, str]:

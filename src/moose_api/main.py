@@ -350,6 +350,9 @@ async def require_api_key(
     if not shared_key:
         raise HTTPException(status_code=500, detail="API key not configured")
     token = api_key or (bearer.credentials if bearer else None) or ""
+    if not token and not app.state.settings.MOOSE_AUTH_ENABLED:
+        # Login disabled (local development): the caller is the local developer.
+        return await _admin_client(_local_developer())
     if hmac.compare_digest(token.encode(), shared_key.encode()):
         _current_client.set(SHARED_KEY_CLIENT)
         _current_vault.set(None)
@@ -376,8 +379,38 @@ async def require_user(client: str = Depends(require_api_key)) -> Unlocked:
     return unlocked
 
 
+LOCAL_DEVELOPER_SUB = "local-developer"
+
+
+def _local_developer() -> dict[str, Any]:
+    """The identity everyone gets when login is disabled: a user and an administrator."""
+    settings: Settings = app.state.settings
+    return {
+        "sub": LOCAL_DEVELOPER_SUB,
+        "name": "Local developer",
+        "email": None,
+        "realm_access": {"roles": [settings.MOOSE_OIDC_USER_ROLE, settings.MOOSE_OIDC_ADMIN_ROLE]},
+    }
+
+
+def check_auth_settings(settings: Settings) -> None:
+    """Refuse to run without login anywhere but on a developer's machine."""
+    if settings.MOOSE_AUTH_ENABLED:
+        return
+    url = (settings.MOOSE_DASHBOARD_URL or "").lower()
+    local_url = url.startswith(("http://localhost", "http://127.0.0.1"))
+    local_bind = settings.MOOSE_BIND_ADDRESS in ("127.0.0.1", "localhost", "::1")
+    if not (local_url and local_bind):
+        raise RuntimeError(
+            "MOOSE_AUTH_ENABLED=false is only allowed locally: set MOOSE_BIND_ADDRESS=127.0.0.1 and "
+            "MOOSE_DASHBOARD_URL to a http://localhost address, or enable login."
+        )
+
+
 async def _verify_login(bearer: HTTPAuthorizationCredentials | None, role: str) -> dict[str, Any]:
     """Claims of a verified account login token (Keycloak access token) with `role`."""
+    if not app.state.settings.MOOSE_AUTH_ENABLED:
+        return _local_developer()
     verifier: OIDCVerifier | None = app.state.oidc
     if verifier is None:
         raise HTTPException(status_code=503, detail="Account login is not configured on this server.")
@@ -427,6 +460,7 @@ async def startup() -> None:
     settings = get_settings()
     if not settings.MOOSE_API_KEY:
         raise RuntimeError("MOOSE_API_KEY is required for the API service")
+    check_auth_settings(settings)
 
     job_store, queue_backend, info = await build_backends(settings)
     mongo_client = info.get("mongo_client")
@@ -448,7 +482,7 @@ async def startup() -> None:
             jwks_url=settings.MOOSE_OIDC_JWKS_URL,
             client_ids=[c.strip() for c in settings.MOOSE_OIDC_CLIENT_IDS.split(",") if c.strip()],
         )
-        if settings.MOOSE_OIDC_ISSUER
+        if settings.MOOSE_AUTH_ENABLED and settings.MOOSE_OIDC_ISSUER
         else None
     )
     app.state.shared_models = shared_models

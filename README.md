@@ -245,12 +245,16 @@ Production, with an existing Keycloak:
 
 To develop against the real Keycloak, set `MOOSE_DASHBOARD_OIDC_CLIENT_ID=moose-dashboard-dev`
 with that client's secret, and `MOOSE_OIDC_CLIENT_IDS=moose-dashboard,moose-dashboard-dev`.
-Without access to it, `./scripts/dev_keycloak.sh` starts a stand-in Keycloak on
-`http://localhost:8180` with this realm and a test user, and writes the
-settings to `.env` (the test login goes to `data/dev-keycloak.txt`). It is
-for development only: deployment never starts a Keycloak (`docker-compose.yml`
-has none), and the script refuses to run when the env file already points to
-another Keycloak.
+### Login off for local development
+
+Set `MOOSE_AUTH_ENABLED=false` to run without any login: every dashboard
+visitor is a "Local developer" with both the `moose-user` and `moose-admin`
+roles, so the Account page shows the vault and the shared models at once, and
+admin API calls need no token. The dashboard shows a red banner while it is
+off. Moose refuses to start this way unless `MOOSE_BIND_ADDRESS` is
+`127.0.0.1` and `MOOSE_DASHBOARD_URL` is a `http://localhost` address, so it
+cannot be switched off on a server by mistake. Set it back to `true` (the
+default) to use Keycloak; deployment never starts a Keycloak of its own.
 
 - **During a job** the user's provider key is decrypted in memory only, in the
   process that accepted the job. If Moose restarts first, the job fails with a

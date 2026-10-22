@@ -3,7 +3,10 @@
 # [auth] settings from the environment (never baked into the image).
 set -eu
 
-if [ -n "${MOOSE_DASHBOARD_OIDC_CLIENT_ID:-}" ]; then
+auth_enabled="$(printf '%s' "${MOOSE_AUTH_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')"
+case "$auth_enabled" in false | 0 | no | off) auth_enabled=false ;; *) auth_enabled=true ;; esac
+
+if [ "$auth_enabled" = true ] && [ -n "${MOOSE_DASHBOARD_OIDC_CLIENT_ID:-}" ]; then
     mkdir -p .streamlit
     umask 077
     python - > .streamlit/secrets.toml <<'PY'

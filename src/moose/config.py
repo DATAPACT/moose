@@ -33,8 +33,15 @@ class Settings(BaseSettings):
     MOOSE_OPENROUTER_API_KEY: str | None = None
     MOOSE_OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
-    # Account provider (Keycloak) for the dashboard login. Unset = no account login;
-    # invitations still work.
+    # Login through Keycloak. false = no login at all (local development only): every
+    # dashboard visitor is a local developer with the user and admin roles. Moose refuses
+    # to start that way unless MOOSE_BIND_ADDRESS is loopback and MOOSE_DASHBOARD_URL is a
+    # localhost address, so it cannot be switched off on a server by mistake.
+    MOOSE_AUTH_ENABLED: bool = True
+    MOOSE_BIND_ADDRESS: str = "127.0.0.1"
+    MOOSE_DASHBOARD_URL: str | None = None
+
+    # Account provider (Keycloak) for the dashboard login.
     MOOSE_OIDC_ISSUER: str | None = None
     # Where Moose fetches the signing keys, if different from the issuer's URL
     # (for example from inside Docker).

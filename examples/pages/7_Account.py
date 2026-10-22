@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from moose_ui.account import account_request, login_configured
+from moose_ui.account import account_request, auth_disabled_banner, auth_enabled, logged_in, login_configured
 from moose_ui.config import sidebar
 from moose_ui.sections import shared_models_section, vault_section
 
@@ -10,12 +10,13 @@ st.title("Account")
 
 cfg = sidebar()
 base_url = cfg["base_url"]
+auth_disabled_banner()
 
 if not login_configured():
     st.info("Account login is not configured on this server. Use an API token in the sidebar.")
     st.stop()
 
-if not st.user.is_logged_in:
+if not logged_in():
     st.write("Log in to manage your own LLM provider keys, or the shared models if you are an administrator.")
     st.button("Log in", type="primary", on_click=st.login)
     st.stop()
@@ -30,7 +31,8 @@ account = resp.json()
 
 cols = st.columns([4, 1])
 cols[0].caption(f"Logged in as {account['name']}" + (" · administrator" if account["is_admin"] else ""))
-cols[1].button("Log out", on_click=st.logout)
+if auth_enabled():
+    cols[1].button("Log out", on_click=st.logout)
 
 # Sections follow the account's roles: users manage their vault, administrators the
 # shared models. An account can have both.

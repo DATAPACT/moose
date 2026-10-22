@@ -7,7 +7,7 @@ from typing import Any
 import streamlit as st
 
 from moose_ui.api import api_post, wait_for_job
-from moose_ui.account import admin_headers, login_configured
+from moose_ui.account import admin_headers, auth_disabled_banner, logged_in, login_configured
 from moose_ui.config import llm_options, sidebar, validate_common
 from moose_ui.metadata import clear_metadata_caches, fetch_schemas
 from moose_ui.render import render_job
@@ -146,7 +146,8 @@ if err:
 if not login_configured():
     st.error("Account login is not configured on this server, so schemas cannot be changed here.")
     st.stop()
-if not st.user.is_logged_in:
+auth_disabled_banner()
+if not logged_in():
     st.write("Log in with an administrator account to add or change schemas.")
     st.button("Log in", type="primary", on_click=st.login)
     st.stop()
