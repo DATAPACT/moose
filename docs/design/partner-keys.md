@@ -1,7 +1,7 @@
 # Design: partner-owned LLM keys in hosted Moose
 
-Status: phases 1 (vault and tokens) and 2 (Keycloak accounts and dashboard)
-implemented; phases 3 and 4 open.
+Status: phases 1 (vault and tokens), 2 (Keycloak accounts and dashboard) and 4
+(shared models without LiteLLM) implemented; phase 3 open.
 
 ## Goal
 
@@ -142,6 +142,12 @@ Models the operator provides (and pays for) are separate from user keys:
 
 Option 2 removes two containers and most of the gateway quirks. Either way, the
 model a job used is recorded in its metadata.
+
+**Decision (phase 4):** option 2. The operator's key is set on the dashboard's
+Admin page and stored encrypted with a server key (`MOOSE_SECRET_KEY`), because
+jobs of any user must be able to use it without the operator present. The
+operator picks the shared models from OpenRouter's catalogue; spending is capped
+with a credit limit on the key at the provider.
 
 ## What the operator can and cannot do
 

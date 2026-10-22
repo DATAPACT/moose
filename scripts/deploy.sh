@@ -20,7 +20,7 @@ if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
     echo "Created Docker network $proxy_network."
 fi
 
-mkdir -p data/litellm-postgres data/moose-user
+mkdir -p data/moose-user
 if [ -z "$(sed -n 's/^MOOSE_MONGO_VOLUME=//p' "$ENV_FILE" | tail -n 1)" ]; then
     mkdir -p data/mongo
 fi

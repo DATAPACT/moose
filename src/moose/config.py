@@ -13,8 +13,11 @@ class Settings(BaseSettings):
     MOOSE_LLM_PROVIDER: str = "gateway"
     # Model name or gateway alias used when a request does not name one.
     MOOSE_MODEL: str | None = None
-    # Admin API key (full access). Partners use their own LiteLLM virtual keys instead.
+    # Admin API key (full access). External users get their own vault API tokens.
     MOOSE_API_KEY: str | None = None
+    # Encrypts the operator's shared provider key at rest. Random, long; never change it
+    # after storing the key (re-enter the key if you do).
+    MOOSE_SECRET_KEY: str | None = None
     MOOSE_MAX_RETRIES: int = 2
     MOOSE_WORKER_COUNT: int = 4
     MOOSE_QUEUE_MAXSIZE: int = 1000

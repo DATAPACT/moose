@@ -16,13 +16,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from moose.config import Settings, get_settings
 from moose.ingest import delete_user_schema, preview_schema_payload, update_user_schema_metadata
-from moose.llm import OpenAICompatibleClient, create_client
 from moose.pipelines import load_privacy_profiles
 from moose.schema import get_schema_config, list_schema_names, reload_schema_registry
 from moose.privacy import get_machine_report_json_schema, list_policy_packs
 from moose.vault import VaultError
 from moose_api.oidc import OIDCError, OIDCVerifier
 from moose_api.queue import JobRecord, WorkerPool, build_backends, utc_now
+from moose_api.shared_models import SharedModelsError, SharedModelsStore
 from moose_api.vault_store import PROVIDERS, ProviderRoute, Unlocked, VaultStore
 
 
@@ -327,28 +327,18 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 # Two kinds of callers:
-# - admin: MOOSE_API_KEY. Full access; LLM calls use Moose's own gateway key (shared models).
+# - admin: MOOSE_API_KEY. Full access, including the shared models (the operator's own
+#   provider key and the models everyone may use).
 # - users: a vault API token (see docs/design/partner-keys.md). The token unlocks the user's
 #   vault in memory for the request, so their own provider keys can be used; the server
 #   stores only hashes, wrapped keys and ciphertext. Users cannot change schemas and only
 #   see their own jobs.
 ADMIN_CLIENT = "admin"
-_LLM_NOT_CONFIGURED = "The LLM is not configured on this server. The administrator must set MOOSE_MODEL."
-_MODEL_CACHE_TTL_SECS = 60.0
+_NO_SHARED_MODELS = "No shared models are set up. Use one of your own keys (llm.key_id), or ask the administrator."
 
 _current_client: ContextVar[str | None] = ContextVar("moose_api_client", default=None)
 # The caller's unlocked vault (users only); never stored.
 _current_vault: ContextVar[Unlocked | None] = ContextVar("moose_vault", default=None)
-
-
-def _gateway_client() -> OpenAICompatibleClient:
-    settings: Settings = app.state.settings
-    return OpenAICompatibleClient(
-        base_url=settings.MOOSE_LLM_BASE_URL,
-        api_key=settings.MOOSE_LLM_API_KEY,
-        model=settings.MOOSE_MODEL or "",
-        timeout=10.0,
-    )
 
 
 async def require_api_key(
@@ -419,9 +409,11 @@ async def startup() -> None:
         await VaultStore.mongo(mongo_client[settings.MOOSE_MONGO_DB]) if mongo_client else VaultStore.in_memory()
     )
 
-    # Default model (MOOSE_MODEL). Requests may pick another model the administrator made
-    # available to Moose's gateway key; the gateway enforces that list.
-    llm_client = create_client(settings) if settings.MOOSE_MODEL else None
+    shared_models = (
+        SharedModelsStore.mongo(mongo_client[settings.MOOSE_MONGO_DB], settings.MOOSE_SECRET_KEY)
+        if mongo_client
+        else SharedModelsStore.in_memory(settings.MOOSE_SECRET_KEY)
+    )
 
     app.state.settings = settings
     app.state.vault = vault_store
@@ -435,13 +427,12 @@ async def startup() -> None:
         if settings.MOOSE_OIDC_ISSUER
         else None
     )
-    app.state.model_cache = None
+    app.state.shared_models = shared_models
     app.state.job_store = job_store
     app.state.queue_backend = queue_backend
     app.state.queue_info = info
-    app.state.llm_client = llm_client
 
-    worker_pool = WorkerPool(queue_backend, job_store, llm_client, settings)
+    worker_pool = WorkerPool(queue_backend, job_store, shared_models, settings)
     await worker_pool.start()
     app.state.worker_pool = worker_pool
 
@@ -463,43 +454,21 @@ def _new_job_id() -> str:
 
 
 async def _available_models() -> list[str]:
-    """Shared models: whatever Moose's own gateway key allows."""
-    settings: Settings = app.state.settings
-    if not settings.MOOSE_MODEL:
-        raise HTTPException(status_code=503, detail=_LLM_NOT_CONFIGURED)
-    if settings.MOOSE_LLM_PROVIDER.lower() != "gateway":
-        return [settings.MOOSE_MODEL]
-    cached = app.state.model_cache
-    if cached and time.monotonic() - cached[0] < _MODEL_CACHE_TTL_SECS:
-        return cached[1]
-    client = _gateway_client()
-    try:
-        models = await client.list_models()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"Could not read the model list from the LLM gateway: {exc}") from exc
-    finally:
-        await client.close()
-    app.state.model_cache = (time.monotonic(), models)
+    """Shared models set up by the administrator."""
+    models, _default = await app.state.shared_models.models()
     return models
 
 
-def _default_model(models: list[str]) -> str | None:
-    default = app.state.settings.MOOSE_MODEL
-    if default in models:
-        return default
-    return models[0] if models else None
+async def _default_model(models: list[str]) -> str | None:
+    _models, default = await app.state.shared_models.models()
+    return default if default in models else (models[0] if models else None)
 
 
 async def _resolve_model(requested: str | None) -> str:
-    settings: Settings = app.state.settings
-    if not settings.MOOSE_MODEL:
-        raise HTTPException(status_code=503, detail=_LLM_NOT_CONFIGURED)
-    if settings.MOOSE_LLM_PROVIDER.lower() != "gateway":
-        return settings.MOOSE_MODEL
     models = await _available_models()
-    model = requested or _default_model(models)
+    model = requested or await _default_model(models)
     if model is None:
-        raise HTTPException(status_code=400, detail="No shared LLM models are available.")
+        raise HTTPException(status_code=503, detail=_NO_SHARED_MODELS)
     if model not in models:
         raise HTTPException(
             status_code=400,
@@ -797,7 +766,7 @@ async def preview_schema_ingest(
 
     llm_client = None
     if request.use_llm_fallback:
-        llm_client = app.state.worker_pool.client_for(await _resolve_model(request.llm.model))
+        llm_client = await app.state.worker_pool.shared_client(await _resolve_model(request.llm.model))
 
     payload = _build_schema_ingest_payload(request)
     try:
@@ -807,6 +776,9 @@ async def preview_schema_ingest(
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if llm_client is not None:
+            await llm_client.close()
 
 
 @app.patch("/schemas/{schema_name}", dependencies=[Depends(require_admin_key)], tags=["Schemas"])
@@ -939,10 +911,11 @@ async def get_privacy_report_schema_endpoint() -> dict[str, Any]:
 async def health():
     settings: Settings = app.state.settings
     queue_info = app.state.queue_info
+    models, default = await app.state.shared_models.models()
     return {
         "status": "ok",
-        "provider": settings.MOOSE_LLM_PROVIDER,
-        "model": settings.MOOSE_MODEL,
+        "shared_models": len(models),
+        "default_model": default,
         "worker_count": settings.MOOSE_WORKER_COUNT,
         "queue_backend": queue_info.get("queue_backend"),
     }
@@ -1019,7 +992,7 @@ def _load_user_schema_assets(data_dir: Path) -> list[dict[str, Any]]:
 async def list_models() -> dict[str, Any]:
     """Shared models (set up by the administrator) and, for users, their own provider keys."""
     models = await _available_models()
-    response: dict[str, Any] = {"default_model": _default_model(models), "models": models}
+    response: dict[str, Any] = {"default_model": await _default_model(models), "models": models}
     unlocked = _current_vault.get()
     if unlocked is not None:
         response["own_keys"] = await app.state.vault.list_secrets(unlocked.user_id)
@@ -1096,6 +1069,41 @@ async def create_account_vault(claims: dict[str, Any] = Depends(require_account)
         return await app.state.vault.create_account_vault(claims["sub"], _account_name(claims))
     except VaultError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+class SharedKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(default="openrouter", description="One of GET /vault/providers.")
+    api_key: str = Field(min_length=8, repr=False)
+
+
+class SharedModelsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    models: list[str] = Field(description="Model IDs everyone may use, e.g. openai/gpt-oss-120b.")
+    default_model: str | None = None
+
+
+@app.get("/admin/shared-models", dependencies=[Depends(require_admin_key)], tags=["Admin"])
+async def get_shared_models() -> dict[str, Any]:
+    """The shared provider key (masked only) and the models everyone may use."""
+    return await app.state.shared_models.describe()
+
+
+@app.put("/admin/shared-models/key", dependencies=[Depends(require_admin_key)], tags=["Admin"])
+async def set_shared_key(request: SharedKeyRequest) -> dict[str, Any]:
+    """Store the operator's provider key, encrypted with MOOSE_SECRET_KEY. Jobs on shared models use it."""
+    try:
+        return await app.state.shared_models.set_key(request.provider, request.api_key)
+    except SharedModelsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/admin/shared-models", dependencies=[Depends(require_admin_key)], tags=["Admin"])
+async def set_shared_models(request: SharedModelsRequest) -> dict[str, Any]:
+    try:
+        return await app.state.shared_models.set_models(request.models, request.default_model)
+    except SharedModelsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/admin/invites", dependencies=[Depends(require_admin_key)], tags=["Vault"])

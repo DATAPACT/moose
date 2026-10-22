@@ -10,25 +10,28 @@ from moose_api.main import app
 ADMIN_KEY = "admin-key"
 SHARED = ["openai/gpt-oss-120b", "minimax/minimax-m3.1-flash:free"]
 PROVIDER_KEY = "sk-or-v1-user-owned-provider-key-0123456789"
+OPERATOR_KEY = "sk-or-v1-operator-shared-key-9876543210"
 
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
-    async def fake_list_models(self) -> list[str]:
-        return SHARED
-
-    monkeypatch.setattr(OpenAICompatibleClient, "list_models", fake_list_models)
     env = {
         "MOOSE_API_KEY": ADMIN_KEY,
-        "MOOSE_LLM_API_KEY": "sk-moose-gateway",
+        "MOOSE_SECRET_KEY": "server-secret-for-tests",
         "MOOSE_MONGO_URL": "",
-        "MOOSE_MODEL": "openai/gpt-oss-120b",
         "MOOSE_WORKER_COUNT": "0",
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()
     with TestClient(app) as test_client:
+        headers = {"X-API-Key": ADMIN_KEY}
+        assert test_client.put(
+            "/admin/shared-models/key", json={"provider": "openrouter", "api_key": OPERATOR_KEY}, headers=headers
+        ).status_code == 200
+        assert test_client.put(
+            "/admin/shared-models", json={"models": SHARED, "default_model": SHARED[0]}, headers=headers
+        ).status_code == 200
         yield test_client
     get_settings.cache_clear()
 
@@ -197,3 +200,69 @@ async def test_worker_calls_the_users_provider_with_their_key(monkeypatch: pytes
     assert seen == {"base_url": "https://openrouter.ai/api/v1", "key": PROVIDER_KEY, "model": "x/y"}
     job = await store.get_job("j1")
     assert job.status == "failed" and PROVIDER_KEY not in (job.error or "")
+
+
+def test_shared_models_are_admin_only_and_key_stays_encrypted(client: TestClient) -> None:
+    user = _register(client, "Partner A")
+    for method, path in [("get", "/admin/shared-models"), ("put", "/admin/shared-models"), ("put", "/admin/shared-models/key")]:
+        assert client.request(method, path, json={}, headers={"X-API-Key": user["token"]}).status_code == 403
+
+    described = client.get("/admin/shared-models", headers=_admin()).json()
+    assert described["models"] == SHARED and described["default_model"] == SHARED[0]
+    assert OPERATOR_KEY not in repr(described)
+    assert OPERATOR_KEY not in repr(app.state.shared_models._config.docs)
+
+    assert client.get("/models", headers={"X-API-Key": user["token"]}).json()["models"] == SHARED
+    bad_default = client.put("/admin/shared-models", json={"models": SHARED, "default_model": "other"}, headers=_admin())
+    assert bad_default.status_code == 400
+
+
+def test_shared_key_needs_a_server_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in {"MOOSE_API_KEY": ADMIN_KEY, "MOOSE_MONGO_URL": "", "MOOSE_WORKER_COUNT": "0"}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("MOOSE_SECRET_KEY", raising=False)
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as test_client:
+            resp = test_client.put(
+                "/admin/shared-models/key", json={"provider": "openrouter", "api_key": OPERATOR_KEY}, headers=_admin()
+            )
+            assert resp.status_code == 400 and "MOOSE_SECRET_KEY" in resp.json()["detail"]
+            # Without shared models, jobs need the user's own key.
+            assert test_client.post("/schemas/coarse/ner", json={"text": "x"}, headers=_admin()).status_code == 503
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_worker_runs_shared_models_on_the_operator_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from moose.config import Settings
+    from moose_api.queue import InMemoryJobStore, InMemoryQueue, JobRecord, WorkerPool
+    from moose_api.shared_models import SharedModelsStore
+
+    seen: dict[str, str] = {}
+
+    async def fake_generate(self, prompt: str) -> str:
+        seen.update(base_url=str(self._client.base_url).rstrip("/"), key=self._resolve_api_key(), model=self.model)
+        raise RuntimeError("stop after recording")
+
+    monkeypatch.setattr(OpenAICompatibleClient, "generate", fake_generate)
+    shared = SharedModelsStore.in_memory("server-secret-for-tests")
+    await shared.set_key("openrouter", OPERATOR_KEY)
+    settings = Settings(_env_file=None, MOOSE_WORKER_COUNT=0, MOOSE_MAX_RETRIES=0)
+    store = InMemoryJobStore()
+    pool = WorkerPool(InMemoryQueue(10), store, shared, settings)
+    await store.put_job(
+        JobRecord(
+            job_id="j2",
+            endpoint_type="ner",
+            payload={"schema": "coarse", "text": "Alice", "llm": {"model": SHARED[0]}},
+            status="queued",
+            created_at="now",
+            updated_at="now",
+            retries=0,
+            client="user:u1",
+        )
+    )
+    await pool._process_job("j2")
+    assert seen == {"base_url": "https://openrouter.ai/api/v1", "key": OPERATOR_KEY, "model": SHARED[0]}

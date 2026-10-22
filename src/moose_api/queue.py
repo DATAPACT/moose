@@ -8,7 +8,7 @@ from typing import Any
 from moose.config import Settings
 from moose.cpa import run_table_cpa
 from moose.ingest import ingest_schema_payload
-from moose.llm import LLMClient, OpenAICompatibleClient, create_client, track_llm_usage
+from moose.llm import LLMClient, OpenAICompatibleClient, track_llm_usage
 from moose.ner import run_table_annotate, run_tabular_ner, run_text_ner
 from moose.privacy import run_privacy_analyze
 
@@ -37,7 +37,7 @@ def utc_now() -> str:
 _SINGLE_TASK_ID = "__single__"
 _SINGLE_TABLE_ID = "__single_table__"
 INTERRUPTED_PARTNER_JOB_ERROR = "Moose restarted before this job finished. Please submit it again."
-_NO_LLM_MODEL_ERROR = "The LLM is not configured on this server. The administrator must set MOOSE_MODEL."
+_NO_LLM_MODEL_ERROR = "No LLM is available for this job: shared models are not set up and no own key was given."
 
 # Credential fields that older Moose versions stored inside job payloads.
 _LEGACY_LLM_CREDENTIAL_FIELDS = (
@@ -272,16 +272,14 @@ class WorkerPool:
         self,
         queue: QueueBackend,
         store: JobStore,
-        llm_client: LLMClient | None,
+        shared_models: Any,
         settings: Settings,
     ) -> None:
         self._queue = queue
         self._store = store
         self._settings = settings
-        # One client per model alias, shared by all workers.
-        self._clients: dict[str, LLMClient] = {}
-        if llm_client is not None:
-            self._clients[llm_client.model] = llm_client
+        # shared_models.SharedModelsStore: the operator's key for shared models.
+        self._shared_models = shared_models
         self._tasks: list[asyncio.Task] = []
         self._shutdown = asyncio.Event()
         self._queue.set_shutdown_event(self._shutdown)
@@ -308,18 +306,20 @@ class WorkerPool:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
-        for client in self._clients.values():
-            await client.close()
-        self._clients.clear()
 
-    def client_for(self, model: str | None) -> LLMClient | None:
-        """Client for an admin-approved model alias (validated by the API at submit time)."""
-        model = model or self._settings.MOOSE_MODEL
-        if not model:
-            return None
-        if model not in self._clients:
-            self._clients[model] = create_client(self._settings, model)
-        return self._clients[model]
+    def _client(self, route: Any, model: str) -> LLMClient:
+        return OpenAICompatibleClient(
+            base_url=route.base_url,
+            api_key=route.api_key,
+            model=model,
+            timeout=self._settings.MOOSE_TIMEOUT_SECS,
+            provider=route.provider,
+            extra_headers={"X-Title": "Moose"} if route.provider == "openrouter" else None,
+        )
+
+    async def shared_client(self, model: str) -> LLMClient:
+        """A client on the operator's key for a shared model. The caller closes it."""
+        return self._client(await self._shared_models.route(), model)
 
     async def _worker_loop(self, worker_id: int) -> None:
         while not self._shutdown.is_set():
@@ -339,19 +339,18 @@ class WorkerPool:
 
         await self._store.update_job(job_id, status="processing", updated_at=utc_now())
 
-        model = (job.payload.get("llm") or {}).get("model") or self._settings.MOOSE_MODEL
-        if route is not None:
-            # A user's job runs on the user's own provider key: their models, their bill.
-            llm_client = OpenAICompatibleClient(
-                base_url=route.base_url,
-                api_key=route.api_key,
-                model=model,
-                timeout=self._settings.MOOSE_TIMEOUT_SECS,
-                provider=route.provider,
-                extra_headers={"X-Title": "Moose"} if route.provider == "openrouter" else None,
-            )
-        else:
-            llm_client = self.client_for(model)
+        model = (job.payload.get("llm") or {}).get("model")
+        llm_client: LLMClient | None = None
+        if model:
+            if route is None:
+                # Shared model: the operator's key, decrypted in memory for this job.
+                try:
+                    route = await self._shared_models.route()
+                except Exception:  # noqa: BLE001 - reported below as "not configured"
+                    route = None
+            # Otherwise a user's own key: their models, their bill.
+            if route is not None:
+                llm_client = self._client(route, model)
 
         with track_llm_usage(model) as usage:
             try:
@@ -462,7 +461,7 @@ class WorkerPool:
                     error=str(exc),
                     llm=usage.as_dict(),
                 )
-        if route is not None and llm_client is not None:
+        if llm_client is not None:
             await llm_client.close()
 
 

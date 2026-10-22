@@ -8,7 +8,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from moose.config import get_settings
-from moose.llm import OpenAICompatibleClient
 from moose_api.main import app
 
 ISSUER = "http://keycloak.test/realms/moose"
@@ -40,14 +39,9 @@ def client(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(jwt.PyJWKClient, "get_signing_key_from_jwt", lambda self, token: _SigningKey())
 
-    async def fake_list_models(self) -> list[str]:
-        return ["openai/gpt-oss-120b"]
-
-    monkeypatch.setattr(OpenAICompatibleClient, "list_models", fake_list_models)
     env = {
         "MOOSE_API_KEY": "admin-key",
         "MOOSE_MONGO_URL": "",
-        "MOOSE_MODEL": "openai/gpt-oss-120b",
         "MOOSE_WORKER_COUNT": "0",
         "MOOSE_OIDC_ISSUER": ISSUER,
     }

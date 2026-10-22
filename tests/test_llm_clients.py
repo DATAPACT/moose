@@ -72,7 +72,7 @@ def test_submit_is_rejected_when_server_has_no_model() -> None:
         finally:
             get_settings.cache_clear()
     assert resp.status_code == 503
-    assert "MOOSE_MODEL" in resp.json()["detail"]
+    assert "No shared models" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio

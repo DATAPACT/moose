@@ -24,7 +24,7 @@ The same `docker-compose.yml` is used locally and in production.
 
 ```bash
 cp .env.example .env
-# Set MOOSE_API_KEY and the LITELLM_* secrets in .env before starting.
+# Set MOOSE_API_KEY and MOOSE_SECRET_KEY in .env before starting.
 ./scripts/deploy.sh
 ```
 
@@ -37,15 +37,14 @@ healthy. Rerun it after pulling updates. Check the services with
 Default endpoints, all bound to loopback:
 - API: `http://localhost:8000`
 - Frontend (Streamlit): `http://localhost:8501`
-- LLM gateway admin UI (LiteLLM): `http://localhost:4000/ui`
 
-Then connect an LLM provider as described in [LLM gateway](#llm-gateway).
+Then set up the shared models as described in [Shared models](#shared-models).
 
 ### Production notes
 
 - **Public access:** go through Cloudflare only, as described in
-  [Cloudflare deployment](#cloudflare-deployment). Keep `MOOSE_BIND_ADDRESS` and
-  `LITELLM_BIND_ADDRESS` at `127.0.0.1` so nothing bypasses it.
+  [Cloudflare deployment](#cloudflare-deployment). Keep `MOOSE_BIND_ADDRESS` at
+  `127.0.0.1` so nothing bypasses it.
 - **Existing VM deployment:** the Compose project name is fixed to `moose` and
   MongoDB keeps using `./data/mongo`, so updates reuse the existing data.
   Preserve `data/` when updating the checkout.
@@ -53,9 +52,8 @@ Then connect an LLM provider as described in [LLM gateway](#llm-gateway).
   `MOOSE_ENV_FILE=.env.moose ./scripts/deploy.sh`. Set
   `MOOSE_PROXY_NETWORK=cloudflare_default` there to reuse the Cloudflare
   network; the tunnel itself stays managed separately on the VM.
-- Users enter only their Moose API key in the Streamlit sidebar and can pick
-  one of the models the administrator made available; LLM provider keys stay
-  in the gateway.
+- Users enter only their Moose API token in the Streamlit sidebar and pick a
+  shared model or one of their own keys.
 
 ### Option B: Local API only
 
@@ -65,65 +63,43 @@ source .venv/bin/activate
 pip install -e .
 
 export MOOSE_API_KEY=test-dev-key
-export MOOSE_LLM_BASE_URL=http://localhost:4000/v1   # LiteLLM gateway
-export MOOSE_LLM_API_KEY=<gateway-virtual-key>
-export MOOSE_MODEL=openai/gpt-oss-120b               # default model (gateway name)
+export MOOSE_SECRET_KEY=<random secret>
 uvicorn moose_api.main:app --host 0.0.0.0 --port 8000
 ```
 
-## LLM gateway
+## Shared models
 
-LLM-backed operations go through a [LiteLLM](https://docs.litellm.ai/) gateway,
-which runs as the `litellm` service (with its own Postgres) in Docker Compose.
-Provider keys never pass through Moose requests and are never stored in Moose's
-database.
+Shared models are the models every user may use, on the operator's own provider
+key and at the operator's cost. Users can also bring their own keys (see
+[Partners](#partners)); those are separate.
 
-1. **Log in to the admin UI** at `/ui` (locally `http://localhost:4000/ui`; in
-   production the Cloudflare hostname) with `LITELLM_UI_USERNAME` /
-   `LITELLM_UI_PASSWORD` from the env file. LiteLLM shows a warning that this
-   shared login is enabled; that is expected here, because the UI is reachable
-   only on localhost or behind Cloudflare Access. Use a long random password.
-2. **Add models.** Under *Models + Endpoints → Add Model*, choose *Custom
-   Model Name* and enter the provider route, for example
-   `openrouter/openai/gpt-oss-120b`. Set the *Public Model Name* to the model's
-   own ID without the provider prefix (`openai/gpt-oss-120b`); that is the name
-   Moose shows. Select the stored OpenRouter key under *Existing Credentials*.
-   For a model everyone may use, set the *Model Access Group* to `shared` when
-   creating it (it cannot be added afterwards; delete and re-add the model
-   instead). Keys are stored encrypted with `LITELLM_SALT_KEY`; never change that
-   value after the first start.
-3. **Create a virtual key for Moose.** Under *Virtual Keys*, create a key with a
-   budget whose *Models* is the access group `shared`. Put it in `.env` as
-   `MOOSE_LLM_API_KEY`, set `MOOSE_MODEL` to the default model's public name
-   (for example `openai/gpt-oss-120b`), and rerun `./scripts/deploy.sh`.
+1. **Open the Admin page** of the dashboard with the admin key (`MOOSE_API_KEY`)
+   in the sidebar.
+2. **Add the provider key**, for example your OpenRouter key. Moose stores it
+   encrypted with `MOOSE_SECRET_KEY` and only ever shows it masked. Set a credit
+   limit on that key in OpenRouter's dashboard to cap Moose's spending.
+3. **Choose the models**: search OpenRouter's catalogue (with prices), pick the
+   models everyone may use, and choose the default. Changes apply immediately.
 
-**The administrator decides which models each caller can use.** Moose's own key
-(used for admin requests) and every partner team get the `shared` group, so a
-new shared model appears for everyone within a minute, with no restart and no
-list to edit. `GET /models` lists a caller's models, the Streamlit sidebar
-offers them, and requests may pick one with `"llm": {"model": "<name>"}`;
-without it, Moose uses `MOOSE_MODEL`. Any other name is rejected, and the
-gateway refuses it too. Each key's budget caps its spend.
+The same is available through the API: `GET /admin/shared-models`,
+`PUT /admin/shared-models/key` and `PUT /admin/shared-models`. Requests pick a
+shared model with `"llm": {"model": "<id>"}` (`GET /models` lists them); without
+it, Moose uses the default. Any other model is rejected.
 
 Every job response includes an `llm` block recording what actually ran:
 
 ```json
 "llm": {
   "requested_model": "openai/gpt-oss-120b",
-  "models_used": ["openrouter/openai/gpt-oss-120b"],
+  "models_used": ["openai/gpt-oss-120b"],
   "calls": 1, "prompt_tokens": 812, "completion_tokens": 164,
   "cost_usd": 0.00021, "fallbacks": 0
 }
 ```
 
-Rotating or adding a provider key is done in the gateway UI and needs no Moose
-restart. With OpenRouter, provider keys you add in OpenRouter's own *BYOK*
-settings are used first for the providers they cover, with OpenRouter's shared
-capacity as fallback unless you disable it there; Moose and LiteLLM need no
-change for that. Prompt and response logging is turned off in
-[`deploy/litellm/config.yaml`](deploy/litellm/config.yaml) because Moose sends
-sensitive data through the gateway. The LiteLLM image is pinned by digest;
-review release notes before changing it.
+With OpenRouter, provider keys you add in OpenRouter's own *BYOK* settings are
+used first for the providers they cover, with OpenRouter's shared capacity as
+fallback unless you disable it there; Moose needs no change for that.
 
 ## Cloudflare deployment
 
@@ -135,20 +111,17 @@ accepts no direct traffic for Moose.
 | Hostname | Service | Who gets in |
 | --- | --- | --- |
 | Streamlit UI | `http://moose-demo:8501` | Cloudflare Access: allowed people only |
-| Gateway admin | `http://litellm:4000` | Cloudflare Access: gateway admins only, then the LiteLLM admin login |
 | API | `http://moose-api:8000` | Users with their vault API token, rate-limited by Cloudflare |
 
 Set this up in the Cloudflare dashboard (Zero Trust):
 
-1. **Access applications.** Under *Access → Applications*, add a self-hosted
-   application for the UI hostname and one for the gateway hostname. Give each
-   an *Allow* policy: for the UI, the people or email domain that may use Moose;
-   for the gateway, only the admins' own email addresses, with a short session
-   (for example 8 hours). Note each application's *AUD tag*.
+1. **Access application.** Under *Access → Applications*, add a self-hosted
+   application for the UI hostname with an *Allow* policy for the people or
+   email domain that may use Moose. Note its *AUD tag*.
 2. **Tunnel routes.** Under *Networks → Tunnels*, open the tunnel and add a
-   public hostname for each row of the table. For the UI and gateway hostnames,
-   open *Additional application settings → Access*, turn on *Protect with
-   Access*, and enter the team name and that application's AUD tag. `cloudflared`
+   public hostname for each row of the table. For the UI hostname, open
+   *Additional application settings → Access*, turn on *Protect with Access*,
+   and enter the team name and the application's AUD tag. `cloudflared`
    then refuses any request without a valid Access token, even if an Access
    application is later removed by mistake.
 3. **API protection.** The API hostname has no Access application, so that
@@ -158,12 +131,12 @@ Set this up in the Cloudflare dashboard (Zero Trust):
 
 Then, on the VM:
 
-4. In the env file, keep both bind addresses at `127.0.0.1`.
+4. In the env file, keep `MOOSE_BIND_ADDRESS` at `127.0.0.1`.
 5. Onboard partners with invitations as described in [Partners](#partners).
 
 ## Library use
 
-The `moose` package can call an LLM without the API or the gateway. Keys come
+The `moose` package can call an LLM without the API. Keys come
 from your own code, an environment variable, or a callable that reads a keychain
 or secrets manager on every request:
 
