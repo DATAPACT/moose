@@ -1,7 +1,7 @@
 # Design: partner-owned LLM keys in hosted Moose
 
-Status: phases 1 (vault and tokens), 2 (Keycloak accounts and dashboard) and 4
-(shared models without LiteLLM) implemented; phase 3 open.
+Status: all four phases implemented: vault and tokens, Keycloak accounts and
+dashboard, encrypted jobs, and shared models without LiteLLM.
 
 ## Goal
 
@@ -120,9 +120,13 @@ but is a larger change and not part of this proposal.
 - At submit, the request's token unlocks the data key; the job's provider key
   is decrypted and handed to the in-memory job queue, as partner jobs already
   work today. Nothing secret enters MongoDB in plaintext.
-- If job encryption is on, payload and result are encrypted with the data key
-  before storage; `GET /jobs/{id}` decrypts them with the caller's token.
-- A restart before a job finishes fails it with a request to resubmit.
+- A user's job input, result and error details are encrypted with the data key
+  before storage (always; open question 2 was decided for encryption);
+  `GET /jobs/{id}` decrypts them with the caller's token. Each ciphertext is
+  bound to its job and field, so it cannot be moved to another job.
+- Because the worker needs the data key, all of a user's jobs (also those on
+  shared models) run in the process that accepted them; a restart before a job
+  finishes fails it with a request to resubmit.
 - Job metadata (model used, tokens, cost) stays in plaintext so users and the
   operator can see usage, but it contains no content.
 
@@ -157,7 +161,7 @@ with a credit limit on the key at the provider.
 | See job metadata: model, tokens, cost, timestamps | yes |
 | Read a user's provider keys | no |
 | Run a job on a user's key without the user | no |
-| Read a user's job payloads and results | no, if job encryption is on |
+| Read a user's job payloads and results | no |
 | Recover a user's vault after they lose all tokens and the recovery code | no, by design |
 | Capture keys by deploying modified code | yes; this is the trust assumption |
 

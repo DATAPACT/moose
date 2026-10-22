@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,10 @@ from moose.ingest import ingest_schema_payload
 from moose.llm import LLMClient, OpenAICompatibleClient, track_llm_usage
 from moose.ner import run_table_annotate, run_tabular_ner, run_text_ner
 from moose.privacy import run_privacy_analyze
+from moose.vault import VaultError
+from moose_api.job_sealing import is_sealed, open_payload, seal_value
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -23,7 +28,8 @@ class JobRecord:
     updated_at: str
     retries: int
     result: dict | None = None
-    error: str | None = None
+    # A user's result and error are stored sealed (see job_sealing).
+    error: str | dict | None = None
     # API client (key name) that submitted the job.
     client: str | None = None
     # Model requested, models that actually answered, tokens and cost (see moose.llm.usage).
@@ -159,9 +165,9 @@ class MongoJobStore(JobStore):
 
     async def fail_interrupted_partner_jobs(self) -> int:
         result = await self._jobs.update_many(
-            # Only jobs on a user's own key: their key lived in the old process's memory.
-            # Jobs on shared models are in the durable queue and still run.
-            {"status": {"$in": ["queued", "processing"]}, "payload.llm.key_id": {"$type": "string"}},
+            # Users' jobs ran only in the old process: their vault key (to decrypt the input)
+            # and any own provider key lived in its memory. Other jobs are in the durable queue.
+            {"status": {"$in": ["queued", "processing"]}, "client": {"$regex": "^user:"}},
             {"$set": {"status": "failed", "updated_at": utc_now(), "error": INTERRUPTED_PARTNER_JOB_ERROR}},
         )
         return int(result.modified_count)
@@ -296,9 +302,11 @@ class WorkerPool:
             self._tasks.append(asyncio.create_task(self._worker_loop(idx)))
             self._tasks.append(asyncio.create_task(self._local_worker_loop(idx)))
 
-    def enqueue_local(self, job_id: str, route: Any) -> None:
-        """Queue a job on a user's own key; `route` is a vault_store.ProviderRoute."""
-        self._local_queue.put_nowait((job_id, route))
+    def enqueue_local(self, job_id: str, route: Any, data_key: bytes | None = None) -> None:
+        """Queue a user's job with what only this process may hold: `route` (a
+        vault_store.ProviderRoute) for a job on their own key, and `data_key` to decrypt
+        its input and encrypt its result."""
+        self._local_queue.put_nowait((job_id, route, data_key))
 
     def local_queue_size(self) -> int:
         return self._local_queue.qsize()
@@ -330,14 +338,31 @@ class WorkerPool:
 
     async def _local_worker_loop(self, worker_id: int) -> None:
         while not self._shutdown.is_set():
-            job_id, route = await self._local_queue.get()
-            await self._process_job(job_id, route)
-            del route
+            job_id, route, data_key = await self._local_queue.get()
+            try:
+                await self._process_job(job_id, route, data_key)
+            except Exception:  # noqa: BLE001 - keep serving the queue; the job is not lost silently
+                logger.exception("Local job %s failed outside its pipeline", job_id)
+            del route, data_key
 
-    async def _process_job(self, job_id: str, route: Any = None) -> None:
+    async def _process_job(self, job_id: str, route: Any = None, data_key: bytes | None = None) -> None:
         job = await self._store.get_job(job_id)
         if not job:
             return
+        if is_sealed(job.payload):
+            if data_key is None:
+                await self._store.update_job(
+                    job_id, status="failed", updated_at=utc_now(), error=INTERRUPTED_PARTNER_JOB_ERROR
+                )
+                return
+            # Decrypted in memory only; the stored job keeps the sealed input.
+            try:
+                job = replace(job, payload=open_payload(data_key, job_id, job.payload))
+            except VaultError:
+                await self._store.update_job(
+                    job_id, status="failed", updated_at=utc_now(), error="The job's input cannot be decrypted."
+                )
+                return
 
         await self._store.update_job(job_id, status="processing", updated_at=utc_now())
 
@@ -453,16 +478,17 @@ class WorkerPool:
                     job_id,
                     status="completed",
                     updated_at=utc_now(),
-                    result=result,
+                    result=seal_value(data_key, job_id, "result", result) if data_key else result,
                     llm=usage.as_dict(),
                 )
 
             except Exception as exc:  # noqa: BLE001
+                # A user's error details can quote their input, so they are sealed too.
                 await self._store.update_job(
                     job_id,
                     status="failed",
                     updated_at=utc_now(),
-                    error=str(exc),
+                    error=seal_value(data_key, job_id, "error", str(exc)) if data_key else str(exc),
                     llm=usage.as_dict(),
                 )
         if llm_client is not None:

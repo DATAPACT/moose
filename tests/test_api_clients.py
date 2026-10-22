@@ -96,8 +96,8 @@ def test_job_on_own_key_keeps_the_key_in_memory(client: TestClient) -> None:
     stored = app.state.job_store._jobs[job_id]
     assert stored.payload["llm"] == {"model": "x/y", "key_id": key_id, "provider": "openrouter"}
     assert PROVIDER_KEY not in repr(stored.__dict__)
-    queued_job_id, route = app.state.worker_pool._local_queue.get_nowait()
-    assert queued_job_id == job_id
+    queued_job_id, route, data_key = app.state.worker_pool._local_queue.get_nowait()
+    assert queued_job_id == job_id and data_key is not None
     assert (route.base_url, route.api_key) == ("https://openrouter.ai/api/v1", PROVIDER_KEY)
 
 
@@ -336,7 +336,7 @@ def test_schema_preview_without_shared_key_explains_itself(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_restart_fails_only_jobs_on_users_own_keys() -> None:
+async def test_restart_fails_only_users_jobs() -> None:
     from moose_api.queue import MongoJobStore
 
     class _Result:
@@ -352,5 +352,103 @@ async def test_restart_fails_only_jobs_on_users_own_keys() -> None:
     await MongoJobStore({"jobs": _Jobs()}).fail_interrupted_partner_jobs()
     assert _Jobs.query == {
         "status": {"$in": ["queued", "processing"]},
-        "payload.llm.key_id": {"$type": "string"},
+        "client": {"$regex": "^user:"},
     }
+
+
+TEXT = "Maria Rossi, maria.rossi@example.com, was treated for diabetes."
+
+
+def test_users_job_input_and_result_are_encrypted_at_rest(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import moose_api.queue as queue_module
+
+    async def fake_run_text_ner(tasks, schema, llm_client, settings=None):
+        return {"results": [{"task_id": tasks[0]["task_id"], "entities": [{"text": tasks[0]["text"][:11]}]}]}
+
+    monkeypatch.setattr(queue_module, "run_text_ner", fake_run_text_ner)
+    user = _register(client, "Partner A")
+    resp = client.post("/schemas/coarse/ner", json={"text": TEXT}, headers={"X-API-Key": user["token"]})
+    job_id = resp.json()["job_id"]
+
+    stored = app.state.job_store._jobs[job_id]
+    assert TEXT not in repr(stored.__dict__) and "Maria" not in repr(stored.__dict__)
+    queued_job_id, route, data_key = app.state.worker_pool._local_queue.get_nowait()
+    asyncio.run(app.state.worker_pool._process_job(queued_job_id, route, data_key))
+
+    stored = app.state.job_store._jobs[job_id]
+    assert stored.status == "completed"
+    assert "Maria" not in repr(stored.__dict__)  # result sealed at rest
+
+    owner = client.get(f"/jobs/{job_id}", headers={"X-API-Key": user["token"]}).json()
+    assert owner["result"] == {"entities": [{"text": "Maria Rossi"}]}
+    assert client.get(f"/jobs/{job_id}", headers=_admin()).status_code == 404
+
+
+def test_users_job_errors_are_encrypted_and_readable_by_owner(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import moose_api.queue as queue_module
+
+    async def failing_run_text_ner(tasks, schema, llm_client, settings=None):
+        raise RuntimeError(f"could not parse: {tasks[0]['text']}")
+
+    monkeypatch.setattr(queue_module, "run_text_ner", failing_run_text_ner)
+    user = _register(client, "Partner A")
+    job_id = client.post("/schemas/coarse/ner", json={"text": TEXT}, headers={"X-API-Key": user["token"]}).json()["job_id"]
+    queued = app.state.worker_pool._local_queue.get_nowait()
+    asyncio.run(app.state.worker_pool._process_job(*queued))
+
+    stored = app.state.job_store._jobs[job_id]
+    assert stored.status == "failed" and "Maria" not in repr(stored.__dict__)
+    owner = client.get(f"/jobs/{job_id}", headers={"X-API-Key": user["token"]}).json()
+    assert owner["status"] == "failed" and TEXT in owner["error"]
+
+
+def test_users_job_without_its_key_fails_cleanly(client: TestClient) -> None:
+    import asyncio
+
+    user = _register(client, "Partner A")
+    job_id = client.post("/schemas/coarse/ner", json={"text": TEXT}, headers={"X-API-Key": user["token"]}).json()["job_id"]
+    app.state.worker_pool._local_queue.get_nowait()
+    # As after a restart: the job is still stored, but its vault key is gone.
+    asyncio.run(app.state.worker_pool._process_job(job_id))
+    owner = client.get(f"/jobs/{job_id}", headers={"X-API-Key": user["token"]}).json()
+    assert owner["status"] == "failed" and "submit it again" in owner["error"]
+
+
+def test_shared_key_jobs_stay_readable(client: TestClient) -> None:
+    job_id = _submit(client, SHARED_KEY)
+    assert app.state.job_store._jobs[job_id].payload["text"] == "Alice works at Moose."
+
+
+def test_users_job_result_with_non_json_values_is_sealed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from datetime import datetime, timezone
+
+    import moose_api.queue as queue_module
+
+    async def fake_run_text_ner(tasks, schema, llm_client, settings=None):
+        when = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        return {"results": [{"task_id": tasks[0]["task_id"], "entities": [{"text": "x", "at": when}]}]}
+
+    monkeypatch.setattr(queue_module, "run_text_ner", fake_run_text_ner)
+    user = _register(client, "Partner A")
+    job_id = client.post("/schemas/coarse/ner", json={"text": TEXT}, headers={"X-API-Key": user["token"]}).json()["job_id"]
+    asyncio.run(app.state.worker_pool._process_job(*app.state.worker_pool._local_queue.get_nowait()))
+
+    owner = client.get(f"/jobs/{job_id}", headers={"X-API-Key": user["token"]}).json()
+    assert owner["status"] == "completed" and owner["result"]["entities"][0]["at"].startswith("2026-01-02")
+
+
+def test_users_job_with_undecryptable_input_fails_cleanly(client: TestClient) -> None:
+    import asyncio
+
+    user = _register(client, "Partner A")
+    job_id = client.post("/schemas/coarse/ner", json={"text": TEXT}, headers={"X-API-Key": user["token"]}).json()["job_id"]
+    queued_job_id, route, _ = app.state.worker_pool._local_queue.get_nowait()
+    asyncio.run(app.state.worker_pool._process_job(queued_job_id, route, bytes(32)))
+
+    owner = client.get(f"/jobs/{job_id}", headers={"X-API-Key": user["token"]}).json()
+    assert owner["status"] == "failed" and "cannot be decrypted" in owner["error"]

@@ -5,6 +5,7 @@ import json
 import time
 import uuid
 from contextvars import ContextVar
+from dataclasses import replace
 from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
@@ -21,6 +22,7 @@ from moose.pipelines import load_privacy_profiles
 from moose.schema import get_schema_config, list_schema_names, reload_schema_registry
 from moose.privacy import get_machine_report_json_schema, list_policy_packs
 from moose.vault import VaultError
+from moose_api.job_sealing import is_sealed, open_value, seal_payload
 from moose_api.oidc import OIDCError, OIDCVerifier
 from moose_api.queue import JobRecord, WorkerPool, build_backends, utc_now
 from moose_api.shared_models import SharedModelsError, SharedModelsStore
@@ -570,10 +572,13 @@ async def _enqueue_job(endpoint_type: str, payload: dict, llm: LLMOptions, needs
 
     job_id = _new_job_id()
     now = utc_now()
+    # A user's input is stored encrypted with their vault key; the job then runs in this
+    # process, which holds that key in memory until the job is done.
+    unlocked = _current_vault.get()
     job = JobRecord(
         job_id=job_id,
         endpoint_type=endpoint_type,
-        payload=payload,
+        payload=seal_payload(unlocked.data_key, job_id, payload) if unlocked else payload,
         status="queued",
         created_at=now,
         updated_at=now,
@@ -582,8 +587,9 @@ async def _enqueue_job(endpoint_type: str, payload: dict, llm: LLMOptions, needs
     )
     await job_store.put_job(job)
     try:
-        if route is not None:
-            # Jobs on a user's own key run in this process, so the key never leaves memory.
+        if unlocked is not None:
+            worker_pool.enqueue_local(job_id, route, unlocked.data_key)
+        elif route is not None:
             worker_pool.enqueue_local(job_id, route)
         else:
             await queue_backend.enqueue(job_id)
@@ -872,6 +878,7 @@ async def delete_schema(schema_name: str, remove_files: bool = True) -> dict[str
 # Metadata / jobs
 # ----------
 async def _get_visible_job(job_id: str) -> JobRecord:
+    """The caller's own job, with a user's encrypted result and error opened in memory."""
     job = await app.state.job_store.get_job(job_id)
     client = _current_client.get()
     # Each caller sees only their own jobs. Older jobs (no client, or the former "admin")
@@ -879,6 +886,15 @@ async def _get_visible_job(job_id: str) -> JobRecord:
     owner = job.client if job and job.client not in (None, "admin") else SHARED_KEY_CLIENT
     if not job or owner != client:
         raise HTTPException(status_code=404, detail="Job not found")
+    unlocked = _current_vault.get()
+    if unlocked is not None:
+        try:
+            if is_sealed(job.result):
+                job = replace(job, result=open_value(unlocked.data_key, job.job_id, "result", job.result))
+            if is_sealed(job.error):
+                job = replace(job, error=open_value(unlocked.data_key, job.job_id, "error", job.error))
+        except VaultError:
+            raise HTTPException(status_code=500, detail="The job's stored data cannot be decrypted.") from None
     return job
 
 
