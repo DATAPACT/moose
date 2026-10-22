@@ -7,6 +7,11 @@ import streamlit as st
 from .api import api_get
 
 
+@st.cache_data(ttl=60)
+def fetch_models(base_url: str, api_key: str) -> dict[str, Any]:
+    return api_get(base_url, api_key, "/models")
+
+
 @st.cache_data(ttl=15)
 def fetch_health(base_url: str, api_key: str) -> dict[str, Any]:
     return api_get(base_url, api_key, "/health")

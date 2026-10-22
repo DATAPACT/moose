@@ -15,10 +15,5 @@
       "price": "89.50",
       "currency": "USD"
     }
-  ],
-  "llm": {
-    "provider": "openrouter",
-    "model": "anthropic/claude-3.5-sonnet"
-  }
+  ]
 }
-

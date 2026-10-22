@@ -6,6 +6,7 @@ import httpx
 import streamlit as st
 
 from .api import api_post, wait_for_job
+from .config import llm_options
 from .render import render_job
 from .state import add_job_history
 
@@ -43,6 +44,8 @@ def submit_and_render_job(
     auto_poll: bool,
     persist_result_key: str | None = None,
 ) -> None:
+    if "llm" not in payload and llm_options(cfg):
+        payload = {**payload, "llm": llm_options(cfg)}
     try:
         resp = api_post(cfg["base_url"], cfg["api_key"], path, payload, headers)
     except Exception as exc:  # noqa: BLE001

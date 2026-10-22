@@ -8,7 +8,7 @@ import streamlit as st
 
 
 def _headers(api_key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    h = {"X-API-Key": api_key}
+    h = {"X-API-Key": api_key} if api_key else {}
     if extra:
         h.update(extra)
     return h
@@ -28,16 +28,23 @@ def api_post(base_url: str, api_key: str, path: str, payload: dict[str, Any], ex
         return r.json()
 
 
-def poll_job(base_url: str, api_key: str, job_id: str) -> dict[str, Any]:
-    return api_get(base_url, api_key, f"/jobs/{job_id}")
+def poll_job(base_url: str, api_key: str, job_id: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    return api_get(base_url, api_key, f"/jobs/{job_id}", extra_headers=headers)
 
 
-def wait_for_job(base_url: str, api_key: str, job_id: str, timeout_secs: int = 240, poll_interval_secs: float = 1.0) -> dict[str, Any]:
+def wait_for_job(
+    base_url: str,
+    api_key: str,
+    job_id: str,
+    timeout_secs: int = 240,
+    poll_interval_secs: float = 1.0,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     start = time.time()
     placeholder = st.empty()
 
     while True:
-        data = poll_job(base_url, api_key, job_id)
+        data = poll_job(base_url, api_key, job_id, headers)
         status = data.get("status")
         elapsed = time.time() - start
         placeholder.info(f"Job status: {status} (elapsed: {elapsed:.1f}s)")

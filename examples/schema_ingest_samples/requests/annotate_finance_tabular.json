@@ -19,10 +19,5 @@
       "payment_method": "card",
       "card_last4": "4421"
     }
-  ],
-  "llm": {
-    "provider": "openrouter",
-    "model": "anthropic/claude-3.5-sonnet"
-  }
+  ]
 }
-

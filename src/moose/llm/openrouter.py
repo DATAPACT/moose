@@ -1,42 +1,25 @@
 from __future__ import annotations
 
-import httpx
+from moose.llm.openai_compat import ApiKey, OpenAICompatibleClient
 
-from moose.llm.base import LLMClient
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
-class OpenRouterClient(LLMClient):
-    def __init__(self, api_key: str | None, base_url: str, model: str, timeout: float) -> None:
-        super().__init__(provider="openrouter", model=model)
+class OpenRouterClient(OpenAICompatibleClient):
+    def __init__(
+        self,
+        api_key: ApiKey,
+        model: str,
+        timeout: float,
+        base_url: str = OPENROUTER_BASE_URL,
+    ) -> None:
         if not api_key:
             raise ValueError("OpenRouter API key is required")
-        self._api_key = api_key
-        self._base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout, base_url=self._base_url)
-
-    async def generate(self, prompt: str) -> str:
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "X-Title": "Moose",
-        }
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0,
-        }
-        resp = await self._client.post("/chat/completions", json=payload, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        choices = data.get("choices") or []
-        if not choices:
-            raise RuntimeError("OpenRouter response missing choices")
-        message = choices[0].get("message") or {}
-        content = message.get("content")
-        if not content:
-            raise RuntimeError("OpenRouter response missing content")
-        return content
-
-    async def close(self) -> None:
-        await self._client.aclose()
+        super().__init__(
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            api_key=api_key,
+            provider="openrouter",
+            extra_headers={"X-Title": "Moose"},
+        )

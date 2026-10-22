@@ -7,9 +7,5 @@
   "supports_text": false,
   "supports_table": true,
   "score_mode": "sparse",
-  "use_llm_fallback": true,
-  "llm": {
-    "provider": "openrouter",
-    "model": "anthropic/claude-3.5-sonnet"
-  }
+  "use_llm_fallback": true
 }

@@ -5,7 +5,7 @@ from typing import Any
 
 import streamlit as st
 
-from moose_ui.config import build_llm_headers, sidebar, validate_common
+from moose_ui.config import sidebar, validate_common
 from moose_ui.metadata import fetch_policy_packs, fetch_privacy_profiles, fetch_schemas, schemas_supporting
 from moose_ui.render import render_job
 from moose_ui.samples import DEFAULT_TABLE_SAMPLE
@@ -101,7 +101,6 @@ if not cfg.get("api_key"):
     st.info("Enter your Moose API key in the sidebar.")
     st.stop()
 
-st.caption(f"Provider: {cfg['provider']} | Model: {cfg['model']}")
 PERSIST_RESULT_KEY = "privacy_last_job"
 
 # Metadata
@@ -237,7 +236,6 @@ with tab_text:
             "profile": profile,
             "policy_pack": policy_pack,
             "tasks": [{"kind": "text", "task_id": "pt1", "text": text}],
-            "llm": {"provider": cfg["provider"], "model": cfg["model"]},
         }
 
         if advanced:
@@ -256,7 +254,7 @@ with tab_text:
             cfg=cfg,
             path="/privacy/analyze",
             payload=payload,
-            headers=build_llm_headers(cfg),
+            headers={},
             label=f"Privacy analyze (text) [{profile}]",
             auto_poll=auto_poll,
             persist_result_key=PERSIST_RESULT_KEY,
@@ -301,7 +299,6 @@ with tab_table:
             "profile": profile,
             "policy_pack": policy_pack,
             "tasks": [task],
-            "llm": {"provider": cfg["provider"], "model": cfg["model"]},
         }
 
         if advanced:
@@ -320,7 +317,7 @@ with tab_table:
             cfg=cfg,
             path="/privacy/analyze",
             payload=payload,
-            headers=build_llm_headers(cfg),
+            headers={},
             label=f"Privacy analyze (table) [{profile}]",
             auto_poll=auto_poll,
             persist_result_key=PERSIST_RESULT_KEY,

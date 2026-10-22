@@ -3,15 +3,30 @@ from __future__ import annotations
 from moose.config import Settings
 from moose.llm.base import LLMClient
 
-def create_client(settings: Settings) -> LLMClient:
+
+def create_client(settings: Settings, model: str | None = None, api_key: str | None = None) -> LLMClient:
     provider = settings.MOOSE_LLM_PROVIDER.lower()
+    model = model or settings.MOOSE_MODEL
+    if not model:
+        raise ValueError("No LLM model given. Pass llm.model in the request or set MOOSE_MODEL.")
+
+    if provider == "gateway":
+        from moose.llm.openai_compat import OpenAICompatibleClient
+
+        # api_key: a caller's own gateway key; otherwise Moose's key.
+        return OpenAICompatibleClient(
+            base_url=settings.MOOSE_LLM_BASE_URL,
+            api_key=api_key or settings.MOOSE_LLM_API_KEY,
+            model=model,
+            timeout=settings.MOOSE_TIMEOUT_SECS,
+        )
     if provider == "ollama":
         from moose.llm.ollama import OllamaClient
 
         return OllamaClient(
             host=settings.MOOSE_OLLAMA_HOST,
             token=settings.MOOSE_OLLAMA_TOKEN,
-            model=settings.MOOSE_MODEL,
+            model=model,
             timeout=settings.MOOSE_TIMEOUT_SECS,
         )
     if provider == "openrouter":
@@ -20,26 +35,7 @@ def create_client(settings: Settings) -> LLMClient:
         return OpenRouterClient(
             api_key=settings.MOOSE_OPENROUTER_API_KEY,
             base_url=settings.MOOSE_OPENROUTER_BASE_URL,
-            model=settings.MOOSE_MODEL,
-            timeout=settings.MOOSE_TIMEOUT_SECS,
-        )
-    if provider == "deepinfra":
-        from moose.llm.deepinfra import DeepInfraClient
-
-        return DeepInfraClient(
-            api_key=settings.MOOSE_DEEPINFRA_API_KEY,
-            base_url=settings.MOOSE_DEEPINFRA_BASE_URL,
-            model=settings.MOOSE_MODEL,
-            timeout=settings.MOOSE_TIMEOUT_SECS,
-        )
-
-    if provider == "deepseek":
-        from moose.llm.deepseek import DeepSeekClient
-
-        return DeepSeekClient(
-            api_key=settings.MOOSE_DEEPSEEK_API_KEY,
-            base_url=settings.MOOSE_DEEPSEEK_BASE_URL,
-            model=settings.MOOSE_MODEL,
+            model=model,
             timeout=settings.MOOSE_TIMEOUT_SECS,
         )
     raise ValueError(f"Unsupported LLM provider: {settings.MOOSE_LLM_PROVIDER}")

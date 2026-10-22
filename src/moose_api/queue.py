@@ -8,7 +8,7 @@ from typing import Any
 from moose.config import Settings
 from moose.cpa import run_table_cpa
 from moose.ingest import ingest_schema_payload
-from moose.llm import LLMClient, create_client
+from moose.llm import LLMClient, OpenAICompatibleClient, track_llm_usage
 from moose.ner import run_table_annotate, run_tabular_ner, run_text_ner
 from moose.privacy import run_privacy_analyze
 
@@ -24,6 +24,10 @@ class JobRecord:
     retries: int
     result: dict | None = None
     error: str | None = None
+    # API client (key name) that submitted the job.
+    client: str | None = None
+    # Model requested, models that actually answered, tokens and cost (see moose.llm.usage).
+    llm: dict | None = None
 
 
 def utc_now() -> str:
@@ -32,6 +36,17 @@ def utc_now() -> str:
 
 _SINGLE_TASK_ID = "__single__"
 _SINGLE_TABLE_ID = "__single_table__"
+INTERRUPTED_PARTNER_JOB_ERROR = "Moose restarted before this job finished. Please submit it again."
+_NO_LLM_MODEL_ERROR = "No LLM is available for this job: shared models are not set up and no own key was given."
+
+# Credential fields that older Moose versions stored inside job payloads.
+_LEGACY_LLM_CREDENTIAL_FIELDS = (
+    "openrouter_api_key",
+    "ollama_token",
+    "deepinfra_api_key",
+    "deepseek_api_key",
+    "endpoint",
+)
 
 
 def _strip_warning_ids(warnings: Any, keys: set[str]) -> list[Any]:
@@ -106,6 +121,9 @@ class JobStore:
     async def update_job(self, job_id: str, **fields: Any) -> None:
         raise NotImplementedError
 
+    async def fail_interrupted_partner_jobs(self) -> int:
+        return 0
+
 
 class InMemoryJobStore(JobStore):
     def __init__(self) -> None:
@@ -139,6 +157,22 @@ class MongoJobStore(JobStore):
         await self._jobs.create_index("created_at")
         await self._jobs.create_index("job_id", unique=True)
 
+    async def fail_interrupted_partner_jobs(self) -> int:
+        result = await self._jobs.update_many(
+            # Only jobs on a user's own key: their key lived in the old process's memory.
+            # Jobs on shared models are in the durable queue and still run.
+            {"status": {"$in": ["queued", "processing"]}, "payload.llm.key_id": {"$type": "string"}},
+            {"$set": {"status": "failed", "updated_at": utc_now(), "error": INTERRUPTED_PARTNER_JOB_ERROR}},
+        )
+        return int(result.modified_count)
+
+    async def scrub_legacy_llm_credentials(self) -> int:
+        """Remove LLM provider keys that older versions persisted in job payloads."""
+        fields = {f"payload.llm.{name}": "" for name in _LEGACY_LLM_CREDENTIAL_FIELDS}
+        query = {"$or": [{key: {"$exists": True}} for key in fields]}
+        result = await self._jobs.update_many(query, {"$unset": fields})
+        return int(result.modified_count)
+
     def _doc_to_record(self, doc: dict) -> JobRecord:
         if not doc:
             raise ValueError("Empty job document")
@@ -153,6 +187,8 @@ class MongoJobStore(JobStore):
             retries=doc.get("retries", 0),
             result=doc.get("result"),
             error=doc.get("error"),
+            client=doc.get("client"),
+            llm=doc.get("llm"),
         )
 
     async def get_job(self, job_id: str) -> JobRecord | None:
@@ -233,61 +269,39 @@ class MongoQueue(QueueBackend):
         return int(await self._queue.count_documents({}))
 
 
-def _settings_with_overrides(settings: Settings, overrides: dict) -> Settings:
-    update: dict[str, Any] = {}
-    provider = overrides.get("provider", settings.MOOSE_LLM_PROVIDER).lower()
-
-    if overrides.get("provider"):
-        update["MOOSE_LLM_PROVIDER"] = overrides["provider"]
-    if overrides.get("model"):
-        update["MOOSE_MODEL"] = overrides["model"]
-
-    # Credentials
-    if overrides.get("ollama_token"):
-        update["MOOSE_OLLAMA_TOKEN"] = overrides["ollama_token"]
-    if overrides.get("openrouter_api_key"):
-        update["MOOSE_OPENROUTER_API_KEY"] = overrides["openrouter_api_key"]
-    if overrides.get("deepinfra_api_key"):
-        update["MOOSE_DEEPINFRA_API_KEY"] = overrides["deepinfra_api_key"]
-    if overrides.get("deepseek_api_key"):
-        update["MOOSE_DEEPSEEK_API_KEY"] = overrides["deepseek_api_key"]
-
-    # Endpoint override
-    if overrides.get("endpoint"):
-        if provider == "openrouter":
-            update["MOOSE_OPENROUTER_BASE_URL"] = overrides["endpoint"]
-        elif provider == "ollama":
-            update["MOOSE_OLLAMA_HOST"] = overrides["endpoint"]
-        elif provider == "deepinfra":
-            update["MOOSE_DEEPINFRA_BASE_URL"] = overrides["endpoint"]
-        elif provider == "deepseek":
-            update["MOOSE_DEEPSEEK_BASE_URL"] = overrides["endpoint"]
-
-    if not update:
-        return settings
-    return settings.model_copy(update=update)
-
-
 class WorkerPool:
     def __init__(
         self,
         queue: QueueBackend,
         store: JobStore,
-        llm_client: LLMClient | None,
+        shared_models: Any,
         settings: Settings,
     ) -> None:
         self._queue = queue
         self._store = store
-        self._llm_client = llm_client
         self._settings = settings
+        # shared_models.SharedModelsStore: the operator's key for shared models.
+        self._shared_models = shared_models
         self._tasks: list[asyncio.Task] = []
         self._shutdown = asyncio.Event()
         self._queue.set_shutdown_event(self._shutdown)
+        # Jobs on a user's own provider key, with that key, kept in this process's memory only.
+        self._local_queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=settings.MOOSE_QUEUE_MAXSIZE)
 
     async def start(self) -> None:
+        # User keys lived only in the memory of the previous process, so its unfinished
+        # jobs on user keys can never run.
+        await self._store.fail_interrupted_partner_jobs()
         for idx in range(self._settings.MOOSE_WORKER_COUNT):
-            task = asyncio.create_task(self._worker_loop(idx))
-            self._tasks.append(task)
+            self._tasks.append(asyncio.create_task(self._worker_loop(idx)))
+            self._tasks.append(asyncio.create_task(self._local_worker_loop(idx)))
+
+    def enqueue_local(self, job_id: str, route: Any) -> None:
+        """Queue a job on a user's own key; `route` is a vault_store.ProviderRoute."""
+        self._local_queue.put_nowait((job_id, route))
+
+    def local_queue_size(self) -> int:
+        return self._local_queue.qsize()
 
     async def stop(self) -> None:
         self._shutdown.set()
@@ -295,31 +309,58 @@ class WorkerPool:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
+    def _client(self, route: Any, model: str) -> LLMClient:
+        return OpenAICompatibleClient(
+            base_url=route.base_url,
+            api_key=route.api_key,
+            model=model,
+            timeout=self._settings.MOOSE_TIMEOUT_SECS,
+            provider=route.provider,
+            extra_headers={"X-Title": "Moose"} if route.provider == "openrouter" else None,
+        )
+
+    async def shared_client(self, model: str) -> LLMClient:
+        """A client on the operator's key for a shared model. The caller closes it."""
+        return self._client(await self._shared_models.route(), model)
+
     async def _worker_loop(self, worker_id: int) -> None:
         while not self._shutdown.is_set():
             job_id = await self._queue.dequeue()
-            job = await self._store.get_job(job_id)
-            if not job:
-                continue
+            await self._process_job(job_id)
 
-            await self._store.update_job(job_id, status="processing", updated_at=utc_now())
+    async def _local_worker_loop(self, worker_id: int) -> None:
+        while not self._shutdown.is_set():
+            job_id, route = await self._local_queue.get()
+            await self._process_job(job_id, route)
+            del route
 
-            llm_client = self._llm_client
-            owns_client = False
+    async def _process_job(self, job_id: str, route: Any = None) -> None:
+        job = await self._store.get_job(job_id)
+        if not job:
+            return
 
+        await self._store.update_job(job_id, status="processing", updated_at=utc_now())
+
+        model = (job.payload.get("llm") or {}).get("model")
+        llm_client: LLMClient | None = None
+        no_llm_reason = _NO_LLM_MODEL_ERROR
+        if model:
+            if route is None:
+                # Shared model: the operator's key, decrypted in memory for this job.
+                try:
+                    route = await self._shared_models.route()
+                except Exception as exc:  # noqa: BLE001 - e.g. no key, or stored under another secret
+                    route = None
+                    no_llm_reason = f"Shared models cannot be used: {exc}"
+            # Otherwise a user's own key: their models, their bill.
+            if route is not None:
+                llm_client = self._client(route, model)
+
+        with track_llm_usage(model) as usage:
             try:
-                overrides = job.payload.get("llm") or {}
-                if overrides:
-                    job_settings = _settings_with_overrides(self._settings, overrides)
-                    llm_client = create_client(job_settings)
-                    owns_client = True
-
                 if job.endpoint_type == "ner":
                     if llm_client is None:
-                        raise RuntimeError(
-                            "LLM client not configured. Provide per-request llm overrides with credentials "
-                            "(X-LLM-API-Key) or configure default provider credentials in env."
-                        )
+                        raise RuntimeError(no_llm_reason)
                     single_task = {"task_id": _SINGLE_TASK_ID, "text": job.payload["text"]}
                     raw = await run_text_ner(
                         [single_task],
@@ -331,10 +372,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "tabular":
                     if llm_client is None:
-                        raise RuntimeError(
-                            "LLM client not configured. Provide per-request llm overrides with credentials "
-                            "(X-LLM-API-Key) or configure default provider credentials in env."
-                        )
+                        raise RuntimeError(no_llm_reason)
                     single_task = {
                         "task_id": _SINGLE_TASK_ID,
                         "table_id": job.payload.get("table_id") or _SINGLE_TABLE_ID,
@@ -350,10 +388,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "tabular_ner":
                     if llm_client is None:
-                        raise RuntimeError(
-                            "LLM client not configured. Provide per-request llm overrides with credentials "
-                            "(X-LLM-API-Key) or configure default provider credentials in env."
-                        )
+                        raise RuntimeError(no_llm_reason)
                     single_task = {
                         "task_id": _SINGLE_TASK_ID,
                         "table_id": job.payload.get("table_id") or _SINGLE_TABLE_ID,
@@ -372,10 +407,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "privacy_analyze":
                     if llm_client is None:
-                        raise RuntimeError(
-                            "LLM client not configured. Provide per-request llm overrides with credentials "
-                            "(X-LLM-API-Key) or configure default provider credentials in env."
-                        )
+                        raise RuntimeError(no_llm_reason)
                     result = await run_privacy_analyze(
                         tasks=job.payload["tasks"],
                         policy_pack=job.payload.get("policy_pack"),
@@ -391,10 +423,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "cpa":
                     if llm_client is None:
-                        raise RuntimeError(
-                            "LLM client not configured. Provide per-request llm overrides with credentials "
-                            "(X-LLM-API-Key) or configure default provider credentials in env."
-                        )
+                        raise RuntimeError(no_llm_reason)
                     single_task = {
                         "task_id": _SINGLE_TASK_ID,
                         "table_id": job.payload.get("table_id") or _SINGLE_TABLE_ID,
@@ -425,6 +454,7 @@ class WorkerPool:
                     status="completed",
                     updated_at=utc_now(),
                     result=result,
+                    llm=usage.as_dict(),
                 )
 
             except Exception as exc:  # noqa: BLE001
@@ -433,11 +463,11 @@ class WorkerPool:
                     status="failed",
                     updated_at=utc_now(),
                     error=str(exc),
+                    llm=usage.as_dict(),
                 )
+        if llm_client is not None:
+            await llm_client.close()
 
-            finally:
-                if owns_client and llm_client is not None:
-                    await llm_client.close()
 
 
 async def build_backends(settings: Settings) -> tuple[JobStore, QueueBackend, dict]:
@@ -460,6 +490,7 @@ async def build_backends(settings: Settings) -> tuple[JobStore, QueueBackend, di
             store = MongoJobStore(db)
             queue = MongoQueue(db)
             await store.ensure_indexes()
+            info["scrubbed_legacy_credentials"] = await store.scrub_legacy_llm_credentials()
             await queue.ensure_indexes()
             info["queue_backend"] = "mongo"
             return store, queue, {"mongo_client": client, **info}

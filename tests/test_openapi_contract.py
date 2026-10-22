@@ -51,34 +51,19 @@ def test_openapi_request_models_exclude_removed_flags() -> None:
         assert properties.isdisjoint(removed), (path, sorted(properties.intersection(removed)))
 
 
-def test_openapi_llm_api_key_uses_authorize_security_scheme() -> None:
+def test_openapi_has_no_llm_credential_headers() -> None:
     spec = app.openapi()
-    paths = spec["paths"]
 
-    llm_paths = [
-        "/ner",
-        "/schemas/{schema}/ner",
-        "/tabular/annotate",
-        "/schemas/{schema}/tabular/annotate",
-        "/tabular/cpa",
-        "/schemas/{schema}/tabular/cpa",
-        "/privacy/analyze",
-        "/models",
-    ]
+    schemes = set(spec.get("components", {}).get("securitySchemes", {}))
+    assert "X-LLM-API-Key" not in schemes
 
-    for path in llm_paths:
-        op = paths[path]["post"] if path != "/models" else paths[path]["get"]
-        params = op.get("parameters", [])
-        header_names = {
-            p.get("name")
-            for p in params
-            if isinstance(p, dict) and p.get("in") == "header"
-        }
-        assert "X-LLM-API-Key" not in header_names, (path, sorted(header_names))
-
-        security = op.get("security", [])
-        security_keys = set()
-        for item in security:
-            if isinstance(item, dict):
-                security_keys.update(item.keys())
-        assert "X-LLM-API-Key" in security_keys, (path, security)
+    for path, ops in spec["paths"].items():
+        for method, op in ops.items():
+            header_names = {
+                p.get("name")
+                for p in op.get("parameters", [])
+                if isinstance(p, dict) and p.get("in") == "header"
+            }
+            assert not header_names & {"X-LLM-API-Key", "X-LLM-Endpoint"}, (method, path)
+            for item in op.get("security", []):
+                assert "X-LLM-API-Key" not in item, (method, path)

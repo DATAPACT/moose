@@ -8,24 +8,51 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
-    MOOSE_LLM_PROVIDER: str = "openrouter"
-    MOOSE_MODEL: str = "anthropic/claude-3.5-sonnet"
+    # "gateway" (OpenAI-compatible endpoint such as LiteLLM; used by the API service),
+    # or "ollama" / "openrouter" for direct library use.
+    MOOSE_LLM_PROVIDER: str = "gateway"
+    # Model name or gateway alias used when a request does not name one.
+    MOOSE_MODEL: str | None = None
+    # Key for using the shared models; safe to give to external users. It grants no
+    # admin rights: administration needs an account with MOOSE_OIDC_ADMIN_ROLE.
     MOOSE_API_KEY: str | None = None
+    # Encrypts the operator's shared provider key at rest. Random, long; never change it
+    # after storing the key (re-enter the key if you do).
+    MOOSE_SECRET_KEY: str | None = None
     MOOSE_MAX_RETRIES: int = 2
     MOOSE_WORKER_COUNT: int = 4
     MOOSE_QUEUE_MAXSIZE: int = 1000
+
+    # LLM gateway (OpenAI-compatible). The key is the gateway's virtual key, not a provider key.
+    MOOSE_LLM_BASE_URL: str = "http://localhost:4000/v1"
+    MOOSE_LLM_API_KEY: str | None = None
+
+    # Direct providers (library use).
     MOOSE_OLLAMA_HOST: str = "http://localhost:11434"
     MOOSE_OLLAMA_TOKEN: str | None = None
     MOOSE_OPENROUTER_API_KEY: str | None = None
     MOOSE_OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
-    # DeepInfra (OpenAI-compatible)
-    MOOSE_DEEPINFRA_API_KEY: str | None = None
-    MOOSE_DEEPINFRA_BASE_URL: str = "https://api.deepinfra.com/v1/openai"
+    # Login through Keycloak. false = no login at all (local development only): every
+    # dashboard visitor is a local developer with the user and admin roles. Moose refuses
+    # to start that way unless MOOSE_BIND_ADDRESS is loopback and MOOSE_DASHBOARD_URL is a
+    # localhost address, so it cannot be switched off on a server by mistake.
+    MOOSE_AUTH_ENABLED: bool = True
+    MOOSE_BIND_ADDRESS: str = "127.0.0.1"
+    MOOSE_PROXY_NETWORK: str = "moose-proxy"
+    MOOSE_DASHBOARD_URL: str | None = None
 
-    # DeepSeek (OpenAI-compatible)
-    MOOSE_DEEPSEEK_API_KEY: str | None = None
-    MOOSE_DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    # Account provider (Keycloak) for the dashboard login.
+    MOOSE_OIDC_ISSUER: str | None = None
+    # Where Moose fetches the signing keys, if different from the issuer's URL
+    # (for example from inside Docker).
+    MOOSE_OIDC_JWKS_URL: str | None = None
+    # Clients (comma-separated) whose tokens are accepted, e.g. the dashboard.
+    MOOSE_OIDC_CLIENT_IDS: str = "moose-dashboard"
+    # Realm role an account needs to get a vault.
+    MOOSE_OIDC_USER_ROLE: str = "moose-user"
+    # Realm role for administrators: shared models, invitations, schema changes.
+    MOOSE_OIDC_ADMIN_ROLE: str = "moose-admin"
 
     MOOSE_MONGO_URL: str | None = None
     MOOSE_MONGO_DB: str = "moose"

@@ -1,3 +1,13 @@
+# One Compose file for local use and production. Start it with ./scripts/deploy.sh,
+# which prepares the bind mounts and the proxy network first.
+name: moose
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   moose-api:
     build: .
@@ -15,15 +25,28 @@ services:
       - 0.0.0.0
       - --port
       - "8000"
+      # One process: jobs on users' own keys, and those keys, stay in its memory.
       - --workers
-      - "${MOOSE_WEB_CONCURRENCY:-4}"
+      - "${MOOSE_WEB_CONCURRENCY:-1}"
       - --proxy-headers
       - --forwarded-allow-ips
       - "*"
+    volumes:
+      # User-ingested schemas survive rebuilds.
+      - ./data/moose-user:/app/src/moose/data/user
+      - type: bind
+        source: ./data/user_vocabularies.json
+        target: /app/src/moose/data/user_vocabularies.json
+        bind:
+          create_host_path: false
+    networks:
+      - default
+      - proxy
     depends_on:
       mongo:
         condition: service_healthy
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test:
         - CMD
@@ -42,8 +65,12 @@ services:
   mongo:
     image: mongo:7
     volumes:
-      - ./data/mongo:/data/db
+      # A host folder by default (the VM's existing data). On macOS set
+      # MOOSE_MONGO_VOLUME=moose-mongo: Docker Desktop files under ~/Desktop or
+      # ~/Documents get macOS protection tags that stop MongoDB opening them.
+      - ${MOOSE_MONGO_VOLUME:-./data/mongo}:/data/db
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -59,10 +86,21 @@ services:
       - "${MOOSE_BIND_ADDRESS:-127.0.0.1}:${MOOSE_DEMO_PORT:-8501}:8501"
     environment:
       MOOSE_API_BASE_URL: http://moose-api:8000
+      # Login: MOOSE_AUTH_ENABLED=false turns it off (local development only).
+      MOOSE_AUTH_ENABLED: ${MOOSE_AUTH_ENABLED:-true}
+      MOOSE_DASHBOARD_URL: ${MOOSE_DASHBOARD_URL:-}
+      MOOSE_DASHBOARD_OIDC_METADATA_URL: ${MOOSE_DASHBOARD_OIDC_METADATA_URL:-}
+      MOOSE_DASHBOARD_OIDC_CLIENT_ID: ${MOOSE_DASHBOARD_OIDC_CLIENT_ID:-}
+      MOOSE_DASHBOARD_OIDC_CLIENT_SECRET: ${MOOSE_DASHBOARD_OIDC_CLIENT_SECRET:-}
+      MOOSE_DASHBOARD_COOKIE_SECRET: ${MOOSE_DASHBOARD_COOKIE_SECRET:-}
+    networks:
+      - default
+      - proxy
     depends_on:
       moose-api:
         condition: service_healthy
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test:
         - CMD
@@ -73,3 +111,13 @@ services:
       timeout: 3s
       retries: 10
       start_period: 20s
+
+volumes:
+  moose-mongo:
+
+networks:
+  # Shared with the reverse proxy or tunnel (cloudflare_default on the VM).
+  # The databases never join it.
+  proxy:
+    name: ${MOOSE_PROXY_NETWORK:-moose-proxy}
+    external: true
