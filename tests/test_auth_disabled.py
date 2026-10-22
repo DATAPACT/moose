@@ -57,3 +57,17 @@ def test_login_is_on_by_default() -> None:
     settings = Settings(_env_file=None, MOOSE_API_KEY="k", MOOSE_DASHBOARD_URL="https://moose-ui.zooverse.dev")
     assert settings.MOOSE_AUTH_ENABLED
     check_auth_settings(settings)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"MOOSE_DASHBOARD_URL": "http://localhost.example.org"},
+        {"MOOSE_PROXY_NETWORK": "cloudflare_default"},
+    ],
+    ids=["lookalike-host", "server-proxy-network"],
+)
+def test_login_off_guard_is_not_fooled(overrides: dict[str, str]) -> None:
+    settings = Settings(_env_file=None, **{**LOCAL, **overrides})
+    with pytest.raises(RuntimeError, match="only allowed locally"):
+        check_auth_settings(settings)

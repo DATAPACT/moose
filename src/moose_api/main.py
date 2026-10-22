@@ -5,6 +5,7 @@ import json
 import time
 import uuid
 from contextvars import ContextVar
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
@@ -380,6 +381,8 @@ async def require_user(client: str = Depends(require_api_key)) -> Unlocked:
 
 
 LOCAL_DEVELOPER_SUB = "local-developer"
+# Compose's default proxy network; servers set their real proxy's network instead.
+LOCAL_PROXY_NETWORK = "moose-proxy"
 
 
 def _local_developer() -> dict[str, Any]:
@@ -397,13 +400,17 @@ def check_auth_settings(settings: Settings) -> None:
     """Refuse to run without login anywhere but on a developer's machine."""
     if settings.MOOSE_AUTH_ENABLED:
         return
-    url = (settings.MOOSE_DASHBOARD_URL or "").lower()
-    local_url = url.startswith(("http://localhost", "http://127.0.0.1"))
+    url = urlsplit(settings.MOOSE_DASHBOARD_URL or "")
+    local_url = url.scheme == "http" and url.hostname in ("localhost", "127.0.0.1", "::1")
     local_bind = settings.MOOSE_BIND_ADDRESS in ("127.0.0.1", "localhost", "::1")
-    if not (local_url and local_bind):
+    # A server publishes Moose through a shared proxy network (e.g. cloudflare_default), and
+    # the proxy reaches the containers there whatever the bind address is.
+    local_network = settings.MOOSE_PROXY_NETWORK == LOCAL_PROXY_NETWORK
+    if not (local_url and local_bind and local_network):
         raise RuntimeError(
-            "MOOSE_AUTH_ENABLED=false is only allowed locally: set MOOSE_BIND_ADDRESS=127.0.0.1 and "
-            "MOOSE_DASHBOARD_URL to a http://localhost address, or enable login."
+            "MOOSE_AUTH_ENABLED=false is only allowed locally: MOOSE_BIND_ADDRESS=127.0.0.1, "
+            f"MOOSE_DASHBOARD_URL a http://localhost address and MOOSE_PROXY_NETWORK={LOCAL_PROXY_NETWORK} "
+            "(not a server's proxy network). Otherwise enable login."
         )
 
 
@@ -511,20 +518,15 @@ def _new_job_id() -> str:
     return uuid.uuid4().hex
 
 
-async def _available_models() -> list[str]:
-    """Shared models set up by the administrator."""
-    models, _default = await app.state.shared_models.models()
-    return models
-
-
-async def _default_model(models: list[str]) -> str | None:
-    _models, default = await app.state.shared_models.models()
-    return default if default in models else (models[0] if models else None)
+async def _shared_models() -> tuple[list[str], str | None]:
+    """Shared models set up by the administrator, and the default one (one read)."""
+    models, default = await app.state.shared_models.models()
+    return models, default if default in models else (models[0] if models else None)
 
 
 async def _resolve_model(requested: str | None) -> str:
-    models = await _available_models()
-    model = requested or await _default_model(models)
+    models, default = await _shared_models()
+    model = requested or default
     if model is None:
         raise HTTPException(status_code=503, detail=_NO_SHARED_MODELS)
     if model not in models:
@@ -824,7 +826,10 @@ async def preview_schema_ingest(
 
     llm_client = None
     if request.use_llm_fallback:
-        llm_client = await app.state.worker_pool.shared_client(await _resolve_model(request.llm.model))
+        try:
+            llm_client = await app.state.worker_pool.shared_client(await _resolve_model(request.llm.model))
+        except SharedModelsError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     payload = _build_schema_ingest_payload(request)
     try:
@@ -1050,8 +1055,8 @@ def _load_user_schema_assets(data_dir: Path) -> list[dict[str, Any]]:
 @app.get("/models", dependencies=[Depends(require_api_key)], tags=["Metadata"])
 async def list_models() -> dict[str, Any]:
     """Shared models (set up by the administrator) and, for users, their own provider keys."""
-    models = await _available_models()
-    response: dict[str, Any] = {"default_model": await _default_model(models), "models": models}
+    models, default = await _shared_models()
+    response: dict[str, Any] = {"default_model": default, "models": models}
     unlocked = _current_vault.get()
     if unlocked is not None:
         response["own_keys"] = await app.state.vault.list_secrets(unlocked.user_id)

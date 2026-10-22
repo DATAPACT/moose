@@ -44,6 +44,9 @@ class OIDCVerifier:
             )
         except jwt.PyJWTError as exc:
             raise OIDCError(f"Invalid login token: {exc}") from exc
+        if claims.get("typ") != "Bearer":
+            # Keycloak signs ID and access tokens with the same key; only access tokens count.
+            raise OIDCError("Login token is not an access token.")
         if self.client_ids and claims.get("azp") not in self.client_ids:
             raise OIDCError("Login token was issued to another application.")
         roles = (claims.get("realm_access") or {}).get("roles") or []

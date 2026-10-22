@@ -308,3 +308,49 @@ async def test_shared_key_from_another_secret_must_be_reentered() -> None:
     rotated = SharedModelsStore(old._config, "new-secret")
     described = await rotated.describe()
     assert described["key_unreadable"] and described["masked_key"] is None
+
+
+def test_schema_preview_without_shared_key_explains_itself(monkeypatch: pytest.MonkeyPatch, test_signing_key) -> None:
+    for key, value in {
+        "MOOSE_API_KEY": SHARED_KEY,
+        "MOOSE_SECRET_KEY": "server-secret-for-tests",
+        "MOOSE_OIDC_ISSUER": ISSUER,
+        "MOOSE_MONGO_URL": "",
+        "MOOSE_WORKER_COUNT": "0",
+    }.items():
+        monkeypatch.setenv(key, value)
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as test_client:
+            assert test_client.put(
+                "/admin/shared-models", json={"models": SHARED}, headers=admin_login()
+            ).status_code == 200
+            resp = test_client.post(
+                "/schemas/ingest/preview",
+                json={"name": "x", "source_type": "file", "source_path": "missing.json", "use_llm_fallback": True},
+                headers=admin_login(),
+            )
+            assert resp.status_code == 503 and "provider key" in resp.json()["detail"]
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_restart_fails_only_jobs_on_users_own_keys() -> None:
+    from moose_api.queue import MongoJobStore
+
+    class _Result:
+        modified_count = 0
+
+    class _Jobs:
+        query = None
+
+        async def update_many(self, query, update):
+            _Jobs.query = query
+            return _Result()
+
+    await MongoJobStore({"jobs": _Jobs()}).fail_interrupted_partner_jobs()
+    assert _Jobs.query == {
+        "status": {"$in": ["queued", "processing"]},
+        "payload.llm.key_id": {"$type": "string"},
+    }

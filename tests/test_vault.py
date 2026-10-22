@@ -96,3 +96,19 @@ async def test_unknown_provider_is_rejected() -> None:
     unlocked = await store.unlock(account["token"])
     with pytest.raises(ValueError):
         await store.add_secret(unlocked, "http://10.0.0.5", PROVIDER_KEY, "x", None)
+
+
+@pytest.mark.asyncio
+async def test_invitation_cannot_be_redeemed_twice_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = VaultStore.in_memory()
+    invite = await store.create_invite(None)
+    stale = await store.invites.find_one({"_id": vault.credential_hash(invite["invite_code"])})
+
+    async def stale_find_one(query):
+        # Both redemptions read the invitation before either marks it used.
+        return dict(stale)
+
+    monkeypatch.setattr(store.invites, "find_one", stale_find_one)
+    await store.register(invite["invite_code"], "first")
+    with pytest.raises(vault.VaultError):
+        await store.register(invite["invite_code"], "second")

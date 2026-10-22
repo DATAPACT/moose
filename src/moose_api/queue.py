@@ -159,7 +159,9 @@ class MongoJobStore(JobStore):
 
     async def fail_interrupted_partner_jobs(self) -> int:
         result = await self._jobs.update_many(
-            {"status": {"$in": ["queued", "processing"]}, "client": {"$regex": "^user:"}},
+            # Only jobs on a user's own key: their key lived in the old process's memory.
+            # Jobs on shared models are in the durable queue and still run.
+            {"status": {"$in": ["queued", "processing"]}, "payload.llm.key_id": {"$type": "string"}},
             {"$set": {"status": "failed", "updated_at": utc_now(), "error": INTERRUPTED_PARTNER_JOB_ERROR}},
         )
         return int(result.modified_count)
@@ -341,13 +343,15 @@ class WorkerPool:
 
         model = (job.payload.get("llm") or {}).get("model")
         llm_client: LLMClient | None = None
+        no_llm_reason = _NO_LLM_MODEL_ERROR
         if model:
             if route is None:
                 # Shared model: the operator's key, decrypted in memory for this job.
                 try:
                     route = await self._shared_models.route()
-                except Exception:  # noqa: BLE001 - reported below as "not configured"
+                except Exception as exc:  # noqa: BLE001 - e.g. no key, or stored under another secret
                     route = None
+                    no_llm_reason = f"Shared models cannot be used: {exc}"
             # Otherwise a user's own key: their models, their bill.
             if route is not None:
                 llm_client = self._client(route, model)
@@ -356,7 +360,7 @@ class WorkerPool:
             try:
                 if job.endpoint_type == "ner":
                     if llm_client is None:
-                        raise RuntimeError(_NO_LLM_MODEL_ERROR)
+                        raise RuntimeError(no_llm_reason)
                     single_task = {"task_id": _SINGLE_TASK_ID, "text": job.payload["text"]}
                     raw = await run_text_ner(
                         [single_task],
@@ -368,7 +372,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "tabular":
                     if llm_client is None:
-                        raise RuntimeError(_NO_LLM_MODEL_ERROR)
+                        raise RuntimeError(no_llm_reason)
                     single_task = {
                         "task_id": _SINGLE_TASK_ID,
                         "table_id": job.payload.get("table_id") or _SINGLE_TABLE_ID,
@@ -384,7 +388,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "tabular_ner":
                     if llm_client is None:
-                        raise RuntimeError(_NO_LLM_MODEL_ERROR)
+                        raise RuntimeError(no_llm_reason)
                     single_task = {
                         "task_id": _SINGLE_TASK_ID,
                         "table_id": job.payload.get("table_id") or _SINGLE_TABLE_ID,
@@ -403,7 +407,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "privacy_analyze":
                     if llm_client is None:
-                        raise RuntimeError(_NO_LLM_MODEL_ERROR)
+                        raise RuntimeError(no_llm_reason)
                     result = await run_privacy_analyze(
                         tasks=job.payload["tasks"],
                         policy_pack=job.payload.get("policy_pack"),
@@ -419,7 +423,7 @@ class WorkerPool:
 
                 elif job.endpoint_type == "cpa":
                     if llm_client is None:
-                        raise RuntimeError(_NO_LLM_MODEL_ERROR)
+                        raise RuntimeError(no_llm_reason)
                     single_task = {
                         "task_id": _SINGLE_TASK_ID,
                         "table_id": job.payload.get("table_id") or _SINGLE_TABLE_ID,

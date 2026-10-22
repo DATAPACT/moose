@@ -48,10 +48,8 @@ class SharedModelsStore:
 
     async def _save(self, doc: dict[str, Any]) -> None:
         doc["updated_at"] = datetime.now(timezone.utc).isoformat()
-        if await self._config.find_one({"_id": _CONFIG_ID}):
-            await self._config.update_one({"_id": _CONFIG_ID}, {"$set": doc})
-        else:
-            await self._config.insert_one(doc)
+        fields = {k: v for k, v in doc.items() if k != "_id"}
+        await self._config.update_one({"_id": _CONFIG_ID}, {"$set": fields}, upsert=True)
 
     async def describe(self) -> dict[str, Any]:
         doc = await self._doc()
@@ -100,5 +98,11 @@ class SharedModelsStore:
         doc = await self._doc()
         if self._key is None or not doc.get("sealed"):
             raise SharedModelsError("Shared models are not set up: the administrator must add a provider key.")
-        api_key = vault.decrypt(self._key, doc["sealed"], _KEY_CONTEXT)
+        try:
+            api_key = vault.decrypt(self._key, doc["sealed"], _KEY_CONTEXT)
+        except vault.VaultError:
+            raise SharedModelsError(
+                "The shared provider key was stored under a different MOOSE_SECRET_KEY; an administrator "
+                "must enter it again."
+            ) from None
         return ProviderRoute(provider=doc["provider"], base_url=PROVIDERS[doc["provider"]], api_key=api_key, secret_id="shared")

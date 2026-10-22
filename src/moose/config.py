@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # localhost address, so it cannot be switched off on a server by mistake.
     MOOSE_AUTH_ENABLED: bool = True
     MOOSE_BIND_ADDRESS: str = "127.0.0.1"
+    MOOSE_PROXY_NETWORK: str = "moose-proxy"
     MOOSE_DASHBOARD_URL: str | None = None
 
     # Account provider (Keycloak) for the dashboard login.

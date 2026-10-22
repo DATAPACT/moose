@@ -17,6 +17,7 @@ def login_token(roles: list[str] | None = None, **overrides) -> str:
         "iss": ISSUER,
         "sub": "account-1",
         "azp": "moose-dashboard",
+        "typ": "Bearer",
         "iat": now,
         "exp": now + 300,
         "name": "Partner One",

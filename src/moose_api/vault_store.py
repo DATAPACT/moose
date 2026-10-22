@@ -63,11 +63,16 @@ class MemoryCollection:
     async def insert_one(self, doc: dict[str, Any]) -> None:
         self.docs[doc["_id"]] = dict(doc)
 
-    async def update_one(self, query: dict[str, Any], update: dict[str, Any]) -> None:
+    async def update_one(self, query: dict[str, Any], update: dict[str, Any], upsert: bool = False) -> int:
+        """Number of documents matched (0 or 1), like Motor's matched_count."""
         for doc in self.docs.values():
             if self._matches(doc, query):
                 doc.update(update.get("$set", {}))
-                return
+                return 1
+        if upsert:
+            doc = {**query, **update.get("$set", {})}
+            self.docs[doc["_id"]] = doc
+        return 0
 
     async def delete_one(self, query: dict[str, Any]) -> int:
         for key, doc in list(self.docs.items()):
@@ -90,8 +95,8 @@ class MongoCollection:
     async def insert_one(self, doc: dict[str, Any]) -> None:
         await self._c.insert_one(doc)
 
-    async def update_one(self, query: dict[str, Any], update: dict[str, Any]) -> None:
-        await self._c.update_one(query, update)
+    async def update_one(self, query: dict[str, Any], update: dict[str, Any], upsert: bool = False) -> int:
+        return int((await self._c.update_one(query, update, upsert=upsert)).matched_count)
 
     async def delete_one(self, query: dict[str, Any]) -> int:
         return int((await self._c.delete_one(query)).deleted_count)
@@ -140,7 +145,10 @@ class VaultStore:
         invite = await self.invites.find_one({"_id": vault.credential_hash(invite_code)})
         if not invite or invite.get("used_at") or invite["expires_at"] < _now():
             raise vault.VaultError("Invitation is invalid, used or expired.")
-        await self.invites.update_one({"_id": invite["_id"]}, {"$set": {"used_at": _now()}})
+        # Claim the invitation atomically: of two concurrent redemptions only one matches.
+        claimed = await self.invites.update_one({"_id": invite["_id"], "used_at": None}, {"$set": {"used_at": _now()}})
+        if not claimed:
+            raise vault.VaultError("Invitation is invalid, used or expired.")
         return await self._create_vault(name, oidc_sub=None)
 
     async def find_account(self, oidc_sub: str) -> dict[str, Any] | None:

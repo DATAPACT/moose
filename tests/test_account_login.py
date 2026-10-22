@@ -84,9 +84,10 @@ def test_account_reports_roles_for_the_dashboard(client: TestClient) -> None:
         (_token(iss="http://evil.test/realms/moose"), 401),
         (_token(azp="some-other-app"), 401),
         (_token(_key=OTHER_KEY), 401),
+        (_token(typ="ID"), 401),
         (_token(roles=["offline_access"]), 403),
     ],
-    ids=["expired", "wrong-issuer", "other-client", "forged-signature", "missing-role"],
+    ids=["expired", "wrong-issuer", "other-client", "forged-signature", "id-token", "missing-role"],
 )
 def test_bad_login_tokens_are_rejected(client: TestClient, token: str, status: int) -> None:
     # /account answers any valid login (it reports roles); creating a vault needs the user role.

@@ -252,8 +252,10 @@ visitor is a "Local developer" with both the `moose-user` and `moose-admin`
 roles, so the Account page shows the vault and the shared models at once, and
 admin API calls need no token. The dashboard shows a red banner while it is
 off. Moose refuses to start this way unless `MOOSE_BIND_ADDRESS` is
-`127.0.0.1` and `MOOSE_DASHBOARD_URL` is a `http://localhost` address, so it
-cannot be switched off on a server by mistake. Set it back to `true` (the
+`127.0.0.1`, `MOOSE_DASHBOARD_URL` is a `http://localhost` address and
+`MOOSE_PROXY_NETWORK` is the default `moose-proxy` (a server uses its real
+proxy's network, such as `cloudflare_default`), so it cannot be switched off on
+a server by mistake. Set it back to `true` (the
 default) to use Keycloak; deployment never starts a Keycloak of its own.
 
 - **During a job** the user's provider key is decrypted in memory only, in the
