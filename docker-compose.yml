@@ -25,9 +25,11 @@ services:
       - 0.0.0.0
       - --port
       - "8000"
-      # One process: jobs on users' own keys, and those keys, stay in its memory.
+      # Always one process: users' jobs run in the process that accepted them, with their
+      # vault key in its memory, and a process that starts fails the users' jobs it finds
+      # unfinished. A second process would fail the first one's running jobs.
       - --workers
-      - "${MOOSE_WEB_CONCURRENCY:-1}"
+      - "1"
       - --proxy-headers
       - --forwarded-allow-ips
       - "*"

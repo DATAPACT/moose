@@ -265,8 +265,9 @@ default) to use Keycloak; deployment never starts a Keycloak of its own.
   with `MOOSE_API_KEY` or by administrators are not encrypted.
 - **During a job** the user's vault key, and their provider key for jobs on
   their own key, are held in memory only, in the process that accepted the job.
-  If Moose restarts first, the job fails with a request to submit it again. Run
-  the API as one process (`MOOSE_WEB_CONCURRENCY=1`).
+  If Moose restarts first, the job fails with a request to submit it again. The
+  API therefore always runs as one process (`--workers 1` in `docker-compose.yml`
+  and the `Dockerfile`): a second one would fail the first one's running jobs.
 - **Isolation.** Users see only their own jobs and keys; administrators cannot
   read users' jobs (not even in the database), use their keys, or list their
   vault. Users cannot change schemas or create invitations.
