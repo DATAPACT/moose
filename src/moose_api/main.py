@@ -887,10 +887,14 @@ async def _get_visible_job(job_id: str) -> JobRecord:
     if not job or owner != client:
         raise HTTPException(status_code=404, detail="Job not found")
     unlocked = _current_vault.get()
-    if unlocked is not None and is_sealed(job.result):
-        kind = "error" if job.status == "failed" else "result"
-        opened = open_value(unlocked.data_key, job.job_id, kind, job.result)
-        job = replace(job, result=None, error=opened) if kind == "error" else replace(job, result=opened)
+    if unlocked is not None:
+        try:
+            if is_sealed(job.result):
+                job = replace(job, result=open_value(unlocked.data_key, job.job_id, "result", job.result))
+            if is_sealed(job.error):
+                job = replace(job, error=open_value(unlocked.data_key, job.job_id, "error", job.error))
+        except VaultError:
+            raise HTTPException(status_code=500, detail="The job's stored data cannot be decrypted.") from None
     return job
 
 

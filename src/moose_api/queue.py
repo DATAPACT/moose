@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -11,7 +12,10 @@ from moose.ingest import ingest_schema_payload
 from moose.llm import LLMClient, OpenAICompatibleClient, track_llm_usage
 from moose.ner import run_table_annotate, run_tabular_ner, run_text_ner
 from moose.privacy import run_privacy_analyze
-from moose_api.job_sealing import SEALED_ERROR, is_sealed, open_payload, seal_value
+from moose.vault import VaultError
+from moose_api.job_sealing import is_sealed, open_payload, seal_value
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,7 +28,8 @@ class JobRecord:
     updated_at: str
     retries: int
     result: dict | None = None
-    error: str | None = None
+    # A user's result and error are stored sealed (see job_sealing).
+    error: str | dict | None = None
     # API client (key name) that submitted the job.
     client: str | None = None
     # Model requested, models that actually answered, tokens and cost (see moose.llm.usage).
@@ -334,7 +339,10 @@ class WorkerPool:
     async def _local_worker_loop(self, worker_id: int) -> None:
         while not self._shutdown.is_set():
             job_id, route, data_key = await self._local_queue.get()
-            await self._process_job(job_id, route, data_key)
+            try:
+                await self._process_job(job_id, route, data_key)
+            except Exception:  # noqa: BLE001 - keep serving the queue; the job is not lost silently
+                logger.exception("Local job %s failed outside its pipeline", job_id)
             del route, data_key
 
     async def _process_job(self, job_id: str, route: Any = None, data_key: bytes | None = None) -> None:
@@ -348,7 +356,13 @@ class WorkerPool:
                 )
                 return
             # Decrypted in memory only; the stored job keeps the sealed input.
-            job = replace(job, payload=open_payload(data_key, job_id, job.payload))
+            try:
+                job = replace(job, payload=open_payload(data_key, job_id, job.payload))
+            except VaultError:
+                await self._store.update_job(
+                    job_id, status="failed", updated_at=utc_now(), error="The job's input cannot be decrypted."
+                )
+                return
 
         await self._store.update_job(job_id, status="processing", updated_at=utc_now())
 
@@ -474,8 +488,7 @@ class WorkerPool:
                     job_id,
                     status="failed",
                     updated_at=utc_now(),
-                    error=SEALED_ERROR if data_key else str(exc),
-                    result=seal_value(data_key, job_id, "error", str(exc)) if data_key else None,
+                    error=seal_value(data_key, job_id, "error", str(exc)) if data_key else str(exc),
                     llm=usage.as_dict(),
                 )
         if llm_client is not None:

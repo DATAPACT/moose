@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from fastapi.encoders import jsonable_encoder
+
 from moose import vault
 
 SEALED = "_sealed"
-SEALED_ERROR = "The job failed. Its details are encrypted; only the job's owner can read them."
 
 
 def _context(job_id: str, kind: str) -> str:
@@ -42,7 +43,8 @@ def open_payload(data_key: bytes, job_id: str, stored: dict[str, Any]) -> dict[s
 
 
 def seal_value(data_key: bytes, job_id: str, kind: str, value: Any) -> dict[str, Any]:
-    return {SEALED: vault.encrypt(data_key, json.dumps(value), _context(job_id, kind))}
+    # Encoded as the API would return it, so any value a job may return can be sealed.
+    return {SEALED: vault.encrypt(data_key, json.dumps(jsonable_encoder(value)), _context(job_id, kind))}
 
 
 def open_value(data_key: bytes, job_id: str, kind: str, stored: dict[str, Any]) -> Any:
