@@ -73,9 +73,10 @@ Shared models are the models every user may use, on the operator's own provider
 key and at the operator's cost. Users can also bring their own keys (see
 [Partners](#partners)); those are separate.
 
-1. **Open the Admin page** of the dashboard and log in with an administrator
+1. **Open the Account page** of the dashboard and log in with an administrator
    account (a Keycloak account with the `moose-admin` role, see
-   [Account login](#account-login-keycloak)).
+   [Account login](#account-login-keycloak)). The page shows the *Shared models*
+   section only to administrators.
 2. **Add the provider key**, for example your OpenRouter key. Moose stores it
    encrypted with `MOOSE_SECRET_KEY` and only ever shows it masked. Set a credit
    limit on that key in OpenRouter's dashboard to cap Moose's spending.
@@ -167,7 +168,7 @@ Two kinds of API keys exist, and neither grants administration:
 
 Administration (shared models, invitations, schema changes) needs an
 administrator's login: a Keycloak account with the `moose-admin` role, sent as
-`Authorization: Bearer <access token>`. The dashboard's Admin and BYO Schema
+`Authorization: Bearer <access token>`. The dashboard's Account and BYO Schema
 pages do this after you log in.
 
 ## Partners

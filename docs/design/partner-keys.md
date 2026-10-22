@@ -144,7 +144,7 @@ Option 2 removes two containers and most of the gateway quirks. Either way, the
 model a job used is recorded in its metadata.
 
 **Decision (phase 4):** option 2. The operator's key is set on the dashboard's
-Admin page and stored encrypted with a server key (`MOOSE_SECRET_KEY`), because
+Account page (administrators only) and stored encrypted with a server key (`MOOSE_SECRET_KEY`), because
 jobs of any user must be able to use it without the operator present. The
 operator picks the shared models from OpenRouter's catalogue; spending is capped
 with a credit limit on the key at the provider.

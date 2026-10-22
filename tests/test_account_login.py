@@ -42,6 +42,8 @@ def test_first_login_creates_one_vault_per_account(client: TestClient) -> None:
     assert client.get("/account", headers=_bearer(token)).json() == {
         "name": "Partner One",
         "email": "one@example.org",
+        "can_use_vault": True,
+        "is_admin": False,
         "has_vault": False,
     }
     created = client.post("/account/vault", headers=_bearer(token))
@@ -64,6 +66,17 @@ def test_accounts_get_separate_vaults(client: TestClient) -> None:
     assert first["user_id"] != second["user_id"]
 
 
+def test_account_reports_roles_for_the_dashboard(client: TestClient) -> None:
+    admin_only = client.get("/account", headers=_bearer(_token(roles=["moose-admin"]))).json()
+    assert admin_only["is_admin"] and not admin_only["can_use_vault"] and not admin_only["has_vault"]
+    both = client.get("/account", headers=_bearer(_token(roles=["moose-user", "moose-admin"]))).json()
+    assert both["is_admin"] and both["can_use_vault"]
+    no_roles = client.get("/account", headers=_bearer(_token(roles=[]))).json()
+    assert not no_roles["is_admin"] and not no_roles["can_use_vault"]
+    # Reporting roles grants nothing: an admin-only account cannot create a vault.
+    assert client.post("/account/vault", headers=_bearer(_token(roles=["moose-admin"]))).status_code == 403
+
+
 @pytest.mark.parametrize(
     "token, status",
     [
@@ -76,7 +89,8 @@ def test_accounts_get_separate_vaults(client: TestClient) -> None:
     ids=["expired", "wrong-issuer", "other-client", "forged-signature", "missing-role"],
 )
 def test_bad_login_tokens_are_rejected(client: TestClient, token: str, status: int) -> None:
-    assert client.get("/account", headers=_bearer(token)).status_code == status
+    # /account answers any valid login (it reports roles); creating a vault needs the user role.
+    assert client.get("/account", headers=_bearer(token)).status_code == (200 if status == 403 else status)
     assert client.post("/account/vault", headers=_bearer(token)).status_code == status
 
 

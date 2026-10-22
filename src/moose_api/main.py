@@ -1070,12 +1070,24 @@ def _account_name(claims: dict[str, Any]) -> str:
 
 
 @app.get("/account", tags=["Vault"])
-async def get_account(claims: dict[str, Any] = Depends(require_account)) -> dict[str, Any]:
-    """The logged-in account and whether it already has a vault."""
-    found = await app.state.vault.find_account(claims["sub"])
-    return {"name": _account_name(claims), "email": claims.get("email"), "has_vault": found is not None} | (
-        {"user_id": found["user_id"]} if found else {}
-    )
+async def get_account(bearer: HTTPAuthorizationCredentials | None = Security(bearer_scheme)) -> dict[str, Any]:
+    """The logged-in account, what its roles allow, and whether it already has a vault.
+    Used by the dashboard to show only the sections an account may use; every
+    protected endpoint still checks the role itself."""
+    settings: Settings = app.state.settings
+    claims = await _verify_login(bearer, None)
+    roles = (claims.get("realm_access") or {}).get("roles") or []
+    account: dict[str, Any] = {
+        "name": _account_name(claims),
+        "email": claims.get("email"),
+        "can_use_vault": settings.MOOSE_OIDC_USER_ROLE in roles,
+        "is_admin": settings.MOOSE_OIDC_ADMIN_ROLE in roles,
+    }
+    found = await app.state.vault.find_account(claims["sub"]) if account["can_use_vault"] else None
+    account["has_vault"] = found is not None
+    if found:
+        account["user_id"] = found["user_id"]
+    return account
 
 
 @app.post("/account/vault", tags=["Vault"])
