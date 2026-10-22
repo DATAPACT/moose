@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from moose_api.main import ADMIN_CLIENT, _current_client, app, get_job_privacy_report, get_privacy_report_schema_endpoint
+from moose_api.main import SHARED_KEY_CLIENT, _current_client, app, get_job_privacy_report, get_privacy_report_schema_endpoint
 from moose_api.queue import JobRecord
 
 
 @pytest.fixture(autouse=True)
-def _as_admin():
+def _as_shared_key_caller():
     # These tests call the endpoint directly, so set the client the auth dependency would set.
-    token = _current_client.set(ADMIN_CLIENT)
+    token = _current_client.set(SHARED_KEY_CLIENT)
     yield
     _current_client.reset(token)
 

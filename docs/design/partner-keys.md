@@ -164,7 +164,8 @@ with a credit limit on the key at the provider.
 ## Changes to the current code
 
 - Replace the partner path that accepts LiteLLM virtual keys with vault-backed
-  API tokens. Keep the admin key and admin-only schema routes.
+  API tokens. Administration moves from an API key to accounts with the
+  `moose-admin` role; `MOOSE_API_KEY` only uses the shared models.
 - Add `moose.vault`: data keys, wrapping, AES-GCM, using the `cryptography`
   package.
 - Add vault and token endpoints (`/vault/*`, `/tokens/*`) and dashboard pages:

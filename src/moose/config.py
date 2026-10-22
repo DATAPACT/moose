@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     MOOSE_LLM_PROVIDER: str = "gateway"
     # Model name or gateway alias used when a request does not name one.
     MOOSE_MODEL: str | None = None
-    # Admin API key (full access). External users get their own vault API tokens.
+    # Key for using the shared models; safe to give to external users. It grants no
+    # admin rights: administration needs an account with MOOSE_OIDC_ADMIN_ROLE.
     MOOSE_API_KEY: str | None = None
     # Encrypts the operator's shared provider key at rest. Random, long; never change it
     # after storing the key (re-enter the key if you do).
@@ -42,6 +43,8 @@ class Settings(BaseSettings):
     MOOSE_OIDC_CLIENT_IDS: str = "moose-dashboard"
     # Realm role an account needs to get a vault.
     MOOSE_OIDC_USER_ROLE: str = "moose-user"
+    # Realm role for administrators: shared models, invitations, schema changes.
+    MOOSE_OIDC_ADMIN_ROLE: str = "moose-admin"
 
     MOOSE_MONGO_URL: str | None = None
     MOOSE_MONGO_DB: str = "moose"

@@ -73,16 +73,18 @@ Shared models are the models every user may use, on the operator's own provider
 key and at the operator's cost. Users can also bring their own keys (see
 [Partners](#partners)); those are separate.
 
-1. **Open the Admin page** of the dashboard with the admin key (`MOOSE_API_KEY`)
-   in the sidebar.
+1. **Open the Admin page** of the dashboard and log in with an administrator
+   account (a Keycloak account with the `moose-admin` role, see
+   [Account login](#account-login-keycloak)).
 2. **Add the provider key**, for example your OpenRouter key. Moose stores it
    encrypted with `MOOSE_SECRET_KEY` and only ever shows it masked. Set a credit
    limit on that key in OpenRouter's dashboard to cap Moose's spending.
 3. **Choose the models**: search OpenRouter's catalogue (with prices), pick the
    models everyone may use, and choose the default. Changes apply immediately.
 
-The same is available through the API: `GET /admin/shared-models`,
-`PUT /admin/shared-models/key` and `PUT /admin/shared-models`. Requests pick a
+The same is available through the API (`GET /admin/shared-models`,
+`PUT /admin/shared-models/key`, `PUT /admin/shared-models`) with an
+administrator's login token as `Authorization: Bearer <token>`. Requests pick a
 shared model with `"llm": {"model": "<id>"}` (`GET /models` lists them); without
 it, Moose uses the default. Any other model is rejected.
 
@@ -154,8 +156,19 @@ llm = OpenRouterClient(api_key=lambda: keyring.get_password("moose", "openrouter
 All API calls require:
 - `X-API-Key: <your-key>`
 
-`MOOSE_API_KEY` is the admin key. External users use their own vault API
-token (see [Partners](#partners)).
+Two kinds of API keys exist, and neither grants administration:
+
+- `MOOSE_API_KEY` uses the shared models. It may be given to external users.
+  Everyone holding it shares one identity, so jobs submitted with it can be read
+  by anyone else with the key who knows the job ID (IDs are random and not
+  listable). Users who need private jobs or their own provider keys use a vault
+  token.
+- A vault API token belongs to one user (see [Partners](#partners)).
+
+Administration (shared models, invitations, schema changes) needs an
+administrator's login: a Keycloak account with the `moose-admin` role, sent as
+`Authorization: Bearer <access token>`. The dashboard's Admin and BYO Schema
+pages do this after you log in.
 
 ## Partners
 
@@ -171,7 +184,7 @@ run jobs on them without the user. The design and its limits are described in
 
    ```bash
    curl -sS -X POST http://localhost:8000/admin/invites \
-     -H "X-API-Key: <admin-key>" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer <administrator login token>" -H "Content-Type: application/json" \
      -d '{"note": "Partner A"}'
    ```
 
@@ -218,7 +231,8 @@ Production, with an existing Keycloak:
    changing the client's redirect URI and web origin to the dashboard's public
    URL (for example `https://moose-ui.example.org/oauth2callback`), and set a
    client secret.
-2. Create users and give them the realm role `moose-user`.
+2. Create users and give them the realm role `moose-user`; give administrators
+   the role `moose-admin` (create it if the realm has none).
 3. In the env file set `MOOSE_OIDC_ISSUER` (for example
    `https://keycloak.example.org/realms/moose`), `MOOSE_DASHBOARD_URL`,
    `MOOSE_DASHBOARD_OIDC_METADATA_URL` (the issuer plus
@@ -237,8 +251,8 @@ another Keycloak.
   process that accepted the job. If Moose restarts first, the job fails with a
   request to submit it again. Run the API as one process
   (`MOOSE_WEB_CONCURRENCY=1`).
-- **Isolation.** Users see only their own jobs and keys; the admin cannot read
-  users' jobs through the API, use their keys, or list their vault. Users
+- **Isolation.** Users see only their own jobs and keys; administrators cannot
+  read users' jobs through the API, use their keys, or list their vault. Users
   cannot change schemas or create invitations.
 - **Limit.** A modified, malicious server could capture keys while a job runs.
   Users reduce that risk with provider keys made only for Moose, with a small

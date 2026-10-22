@@ -2,25 +2,37 @@ from __future__ import annotations
 
 import streamlit as st
 
-from moose_ui.account import model_label, openrouter_catalogue, vault_request
+from moose_ui.account import admin_request, login_configured, model_label, openrouter_catalogue
 from moose_ui.config import sidebar
 from moose_ui.metadata import fetch_models
 
 st.title("Admin")
 
 cfg = sidebar()
-base_url, api_key = cfg["base_url"], cfg["api_key"]
+base_url = cfg["base_url"]
 
-if not api_key:
-    st.info("Enter the Moose admin key in the sidebar.")
+# Administration needs a login with the admin role. API keys (including MOOSE_API_KEY,
+# which external users get) never grant it.
+if not login_configured():
+    st.error("Account login is not configured on this server, so administration is unavailable.")
+    st.stop()
+if not st.user.is_logged_in:
+    st.write("Log in with an administrator account to manage the shared models.")
+    st.button("Log in", type="primary", on_click=st.login)
     st.stop()
 
-resp = vault_request("GET", base_url, api_key, "/admin/shared-models")
-if resp.status_code in (401, 403):
-    st.warning("This page needs the Moose admin key.")
+resp = admin_request("GET", base_url, "/admin/shared-models")
+if resp.status_code == 401:
+    st.warning("Your login has expired.")
+    st.button("Log in again", on_click=st.logout)
+    st.stop()
+if resp.status_code == 403:
+    st.error("Your account is not an administrator (it lacks the moose-admin role).")
+    st.button("Log out", on_click=st.logout)
     st.stop()
 resp.raise_for_status()
 shared = resp.json()
+st.caption(f"Logged in as {st.user.get('name') or st.user.get('email')}")
 
 st.subheader("Shared models")
 st.write(
@@ -33,16 +45,18 @@ if not shared["secret_key_configured"]:
     st.error("Set MOOSE_SECRET_KEY on the server first; it encrypts the shared provider key.")
     st.stop()
 
+if shared.get("key_unreadable"):
+    st.warning("The stored provider key was encrypted with a different MOOSE_SECRET_KEY. Enter it again below.")
 if shared.get("masked_key"):
     st.success(f"Provider key stored: {shared['provider']} · `{shared['masked_key']}`")
 with st.expander("Replace provider key" if shared.get("masked_key") else "Add provider key", expanded=not shared.get("masked_key")):
     with st.form("shared-key"):
-        providers = vault_request("GET", base_url, api_key, "/vault/providers").json()["providers"]
+        providers = admin_request("GET", base_url, "/vault/providers").json()["providers"]
         provider = st.selectbox("Provider", providers, index=providers.index("openrouter") if "openrouter" in providers else 0)
         secret = st.text_input("API key", type="password")
         st.caption("Tip: set a credit limit on this key in your provider's dashboard to cap Moose's spending.")
         if st.form_submit_button("Save key", type="primary") and secret.strip():
-            saved = vault_request("PUT", base_url, api_key, "/admin/shared-models/key", {"provider": provider, "api_key": secret.strip()})
+            saved = admin_request("PUT", base_url, "/admin/shared-models/key", {"provider": provider, "api_key": secret.strip()})
             if saved.status_code == 200:
                 st.rerun()
             st.error(saved.json().get("detail", saved.text))
@@ -74,7 +88,7 @@ if selected:
     default = st.selectbox("Default model", selected, index=index)
 
 if st.button("Save models", type="primary"):
-    saved = vault_request("PUT", base_url, api_key, "/admin/shared-models", {"models": selected, "default_model": default})
+    saved = admin_request("PUT", base_url, "/admin/shared-models", {"models": selected, "default_model": default})
     if saved.status_code == 200:
         fetch_models.clear()
         st.success("Saved. Users see these models in the sidebar.")

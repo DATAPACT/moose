@@ -2,43 +2,24 @@ from __future__ import annotations
 
 import time
 
-import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from moose.config import get_settings
 from moose_api.main import app
+from oidc_helpers import ISSUER, bearer, login_token
 
-ISSUER = "http://keycloak.test/realms/moose"
-SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
 def _token(**overrides) -> str:
-    now = int(time.time())
-    claims = {
-        "iss": ISSUER,
-        "sub": "account-1",
-        "azp": "moose-dashboard",
-        "iat": now,
-        "exp": now + 300,
-        "name": "Partner One",
-        "email": "one@example.org",
-        "realm_access": {"roles": ["moose-user"]},
-    }
-    key = overrides.pop("_key", SIGNING_KEY)
-    claims.update(overrides)
-    return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "test"})
+    roles = overrides.pop("roles", None)
+    return login_token(roles, **overrides)
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch):
-    class _SigningKey:
-        key = SIGNING_KEY.public_key()
-
-    monkeypatch.setattr(jwt.PyJWKClient, "get_signing_key_from_jwt", lambda self, token: _SigningKey())
-
+def client(monkeypatch: pytest.MonkeyPatch, test_signing_key):
     env = {
         "MOOSE_API_KEY": "admin-key",
         "MOOSE_MONGO_URL": "",
@@ -53,8 +34,7 @@ def client(monkeypatch: pytest.MonkeyPatch):
     get_settings.cache_clear()
 
 
-def _bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+_bearer = bearer
 
 
 def test_first_login_creates_one_vault_per_account(client: TestClient) -> None:
@@ -91,7 +71,7 @@ def test_accounts_get_separate_vaults(client: TestClient) -> None:
         (_token(iss="http://evil.test/realms/moose"), 401),
         (_token(azp="some-other-app"), 401),
         (_token(_key=OTHER_KEY), 401),
-        (_token(realm_access={"roles": ["offline_access"]}), 403),
+        (_token(roles=["offline_access"]), 403),
     ],
     ids=["expired", "wrong-issuer", "other-client", "forged-signature", "missing-role"],
 )
@@ -112,6 +92,6 @@ def test_account_login_off_when_not_configured(monkeypatch: pytest.MonkeyPatch) 
     get_settings.cache_clear()
     try:
         with TestClient(app) as test_client:
-            assert test_client.get("/account", headers=_bearer(_token())).status_code == 404
+            assert test_client.get("/account", headers=_bearer(_token())).status_code == 503
     finally:
         get_settings.cache_clear()

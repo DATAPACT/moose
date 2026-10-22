@@ -33,6 +33,17 @@ def account_request(method: str, base_url: str, path: str) -> httpx.Response:
         return client.request(method, f"{base_url.rstrip('/')}{path}", headers={"Authorization": f"Bearer {token}"})
 
 
+def admin_headers() -> dict[str, str]:
+    """Authorization for admin endpoints: the logged-in account's token (it needs the admin role)."""
+    token = access_token()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def admin_request(method: str, base_url: str, path: str, payload: dict | None = None) -> httpx.Response:
+    with httpx.Client(timeout=30.0) as client:
+        return client.request(method, f"{base_url.rstrip('/')}{path}", headers=admin_headers(), json=payload)
+
+
 def vault_request(method: str, base_url: str, api_key: str, path: str, payload: dict | None = None) -> httpx.Response:
     with httpx.Client(timeout=30.0) as client:
         return client.request(method, f"{base_url.rstrip('/')}{path}", headers={"X-API-Key": api_key}, json=payload)

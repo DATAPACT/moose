@@ -326,14 +326,15 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-# Two kinds of callers:
-# - admin: MOOSE_API_KEY. Full access, including the shared models (the operator's own
-#   provider key and the models everyone may use).
+# Callers of the annotation API:
+# - shared key: MOOSE_API_KEY. Uses the shared models; may be given to external users, so
+#   it grants no administration.
 # - users: a vault API token (see docs/design/partner-keys.md). The token unlocks the user's
 #   vault in memory for the request, so their own provider keys can be used; the server
-#   stores only hashes, wrapped keys and ciphertext. Users cannot change schemas and only
-#   see their own jobs.
-ADMIN_CLIENT = "admin"
+#   stores only hashes, wrapped keys and ciphertext. Each caller sees only their own jobs.
+# Administration (shared models, invitations, schema changes) needs a login token of an
+# account with the admin role, see require_admin.
+SHARED_KEY_CLIENT = "shared-key"
 _NO_SHARED_MODELS = "No shared models are set up. Use one of your own keys (llm.key_id), or ask the administrator."
 
 _current_client: ContextVar[str | None] = ContextVar("moose_api_client", default=None)
@@ -345,14 +346,17 @@ async def require_api_key(
     api_key: str | None = Security(api_key_header),
     bearer: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ) -> str:
-    admin_key = app.state.settings.MOOSE_API_KEY
-    if not admin_key:
+    shared_key = app.state.settings.MOOSE_API_KEY
+    if not shared_key:
         raise HTTPException(status_code=500, detail="API key not configured")
     token = api_key or (bearer.credentials if bearer else None) or ""
-    if hmac.compare_digest(token.encode(), admin_key.encode()):
-        _current_client.set(ADMIN_CLIENT)
+    if hmac.compare_digest(token.encode(), shared_key.encode()):
+        _current_client.set(SHARED_KEY_CLIENT)
         _current_vault.set(None)
-        return ADMIN_CLIENT
+        return SHARED_KEY_CLIENT
+    if not api_key and bearer is not None and token.count(".") == 2 and app.state.oidc is not None:
+        # An administrator's login token (a JWT), e.g. to follow their own schema-ingest job.
+        return await _admin_client(await require_admin(bearer))
     try:
         unlocked = await app.state.vault.unlock(token)
     except VaultError:
@@ -372,9 +376,30 @@ async def require_user(client: str = Depends(require_api_key)) -> Unlocked:
     return unlocked
 
 
-async def require_admin_key(client: str = Depends(require_api_key)) -> str:
-    if client != ADMIN_CLIENT:
-        raise HTTPException(status_code=403, detail="This operation needs the admin API key.")
+async def _verify_login(bearer: HTTPAuthorizationCredentials | None, role: str) -> dict[str, Any]:
+    """Claims of a verified account login token (Keycloak access token) with `role`."""
+    verifier: OIDCVerifier | None = app.state.oidc
+    if verifier is None:
+        raise HTTPException(status_code=503, detail="Account login is not configured on this server.")
+    if bearer is None:
+        raise HTTPException(status_code=401, detail="Missing login token.")
+    try:
+        return await verifier.verify(bearer.credentials, role)
+    except OIDCError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+async def require_admin(bearer: HTTPAuthorizationCredentials | None = Security(bearer_scheme)) -> dict[str, Any]:
+    """An administrator's login: an account with the admin role. API keys never qualify."""
+    claims = await _verify_login(bearer, app.state.settings.MOOSE_OIDC_ADMIN_ROLE)
+    await _admin_client(claims)
+    return claims
+
+
+async def _admin_client(claims: dict[str, Any]) -> str:
+    client = f"admin:{claims['sub']}"
+    _current_client.set(client)
+    _current_vault.set(None)
     return client
 
 
@@ -422,7 +447,6 @@ async def startup() -> None:
             issuer=settings.MOOSE_OIDC_ISSUER,
             jwks_url=settings.MOOSE_OIDC_JWKS_URL,
             client_ids=[c.strip() for c in settings.MOOSE_OIDC_CLIENT_IDS.split(",") if c.strip()],
-            required_role=settings.MOOSE_OIDC_USER_ROLE or None,
         )
         if settings.MOOSE_OIDC_ISSUER
         else None
@@ -742,7 +766,7 @@ async def submit_privacy_analyze(
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 
-@app.post("/schemas/ingest", dependencies=[Depends(require_admin_key)], tags=["Schemas"], response_model=JobQueuedResponse)
+@app.post("/schemas/ingest", dependencies=[Depends(require_admin)], tags=["Schemas"], response_model=JobQueuedResponse)
 async def submit_schema_ingest(
     request: SchemaIngestRequest,
 ):
@@ -755,7 +779,7 @@ async def submit_schema_ingest(
 
 @app.post(
     "/schemas/ingest/preview",
-    dependencies=[Depends(require_admin_key)],
+    dependencies=[Depends(require_admin)],
     tags=["Schemas"],
     response_model=SchemaIngestPreviewResponse,
 )
@@ -781,7 +805,7 @@ async def preview_schema_ingest(
             await llm_client.close()
 
 
-@app.patch("/schemas/{schema_name}", dependencies=[Depends(require_admin_key)], tags=["Schemas"])
+@app.patch("/schemas/{schema_name}", dependencies=[Depends(require_admin)], tags=["Schemas"])
 async def patch_user_schema(schema_name: str, request: SchemaPatchRequest) -> dict[str, Any]:
     updates = request.model_dump()
     if not any(value is not None for value in updates.values()):
@@ -794,7 +818,7 @@ async def patch_user_schema(schema_name: str, request: SchemaPatchRequest) -> di
         raise HTTPException(status_code=status, detail=detail) from exc
 
 
-@app.delete("/schemas/{schema_name}", dependencies=[Depends(require_admin_key)], tags=["Schemas"])
+@app.delete("/schemas/{schema_name}", dependencies=[Depends(require_admin)], tags=["Schemas"])
 async def delete_schema(schema_name: str, remove_files: bool = True) -> dict[str, Any]:
     try:
         result = delete_user_schema(schema_name, remove_files=remove_files)
@@ -811,9 +835,10 @@ async def delete_schema(schema_name: str, remove_files: bool = True) -> dict[str
 async def _get_visible_job(job_id: str) -> JobRecord:
     job = await app.state.job_store.get_job(job_id)
     client = _current_client.get()
-    # Each caller sees only their own jobs; the admin cannot read users' jobs through the
-    # API. Jobs from before per-client keys belong to admin.
-    if not job or (job.client or ADMIN_CLIENT) != client:
+    # Each caller sees only their own jobs. Older jobs (no client, or the former "admin")
+    # were made with MOOSE_API_KEY.
+    owner = job.client if job and job.client not in (None, "admin") else SHARED_KEY_CLIENT
+    if not job or owner != client:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
@@ -883,7 +908,7 @@ async def list_schemas(include_type_count: bool = False) -> dict[str, Any]:
     return {"schemas": schemas}
 
 
-@app.post("/schemas/reload", dependencies=[Depends(require_admin_key)], tags=["Metadata"])
+@app.post("/schemas/reload", dependencies=[Depends(require_admin)], tags=["Metadata"])
 async def reload_schemas() -> dict[str, Any]:
     names = reload_schema_registry()
     return {"status": "ok", "schema_count": len(names), "schemas": names}
@@ -1036,16 +1061,8 @@ class ProviderKeyRequest(BaseModel):
 async def require_account(
     bearer: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ) -> dict[str, Any]:
-    """Claims of a verified account login token (Keycloak access token)."""
-    verifier: OIDCVerifier | None = app.state.oidc
-    if verifier is None:
-        raise HTTPException(status_code=404, detail="Account login is not configured on this server.")
-    if bearer is None:
-        raise HTTPException(status_code=401, detail="Missing login token.")
-    try:
-        return await verifier.verify(bearer.credentials)
-    except OIDCError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    """Claims of a verified user login (an account with the user role)."""
+    return await _verify_login(bearer, app.state.settings.MOOSE_OIDC_USER_ROLE)
 
 
 def _account_name(claims: dict[str, Any]) -> str:
@@ -1083,13 +1100,13 @@ class SharedModelsRequest(BaseModel):
     default_model: str | None = None
 
 
-@app.get("/admin/shared-models", dependencies=[Depends(require_admin_key)], tags=["Admin"])
+@app.get("/admin/shared-models", dependencies=[Depends(require_admin)], tags=["Admin"])
 async def get_shared_models() -> dict[str, Any]:
     """The shared provider key (masked only) and the models everyone may use."""
     return await app.state.shared_models.describe()
 
 
-@app.put("/admin/shared-models/key", dependencies=[Depends(require_admin_key)], tags=["Admin"])
+@app.put("/admin/shared-models/key", dependencies=[Depends(require_admin)], tags=["Admin"])
 async def set_shared_key(request: SharedKeyRequest) -> dict[str, Any]:
     """Store the operator's provider key, encrypted with MOOSE_SECRET_KEY. Jobs on shared models use it."""
     try:
@@ -1098,7 +1115,7 @@ async def set_shared_key(request: SharedKeyRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.put("/admin/shared-models", dependencies=[Depends(require_admin_key)], tags=["Admin"])
+@app.put("/admin/shared-models", dependencies=[Depends(require_admin)], tags=["Admin"])
 async def set_shared_models(request: SharedModelsRequest) -> dict[str, Any]:
     try:
         return await app.state.shared_models.set_models(request.models, request.default_model)
@@ -1106,7 +1123,7 @@ async def set_shared_models(request: SharedModelsRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/admin/invites", dependencies=[Depends(require_admin_key)], tags=["Vault"])
+@app.post("/admin/invites", dependencies=[Depends(require_admin)], tags=["Vault"])
 async def create_invite(request: InviteRequest) -> dict[str, str]:
     """One-time invitation for a new user. Send the code to the user; it works once."""
     return await app.state.vault.create_invite(request.note, request.valid_days)

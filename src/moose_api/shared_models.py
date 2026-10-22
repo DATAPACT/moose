@@ -55,9 +55,18 @@ class SharedModelsStore:
 
     async def describe(self) -> dict[str, Any]:
         doc = await self._doc()
+        key_readable = False
+        if self._key is not None and doc.get("sealed"):
+            try:
+                vault.decrypt(self._key, doc["sealed"], _KEY_CONTEXT)
+                key_readable = True
+            except vault.VaultError:
+                # Stored under a different MOOSE_SECRET_KEY; it must be entered again.
+                pass
         return {
-            "provider": doc.get("provider"),
-            "masked_key": doc.get("masked"),
+            "provider": doc.get("provider") if key_readable else None,
+            "masked_key": doc.get("masked") if key_readable else None,
+            "key_unreadable": bool(doc.get("sealed")) and not key_readable,
             "models": list(doc.get("models") or []),
             "default_model": doc.get("default_model"),
             "secret_key_configured": self._key is not None,

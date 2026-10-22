@@ -20,13 +20,12 @@ class OIDCError(Exception):
 
 
 class OIDCVerifier:
-    def __init__(self, issuer: str, jwks_url: str | None, client_ids: list[str], required_role: str | None) -> None:
+    def __init__(self, issuer: str, jwks_url: str | None, client_ids: list[str]) -> None:
         self.issuer = issuer.rstrip("/")
         self.client_ids = client_ids
-        self.required_role = required_role
         self._jwks = jwt.PyJWKClient(jwks_url or f"{self.issuer}/protocol/openid-connect/certs", lifespan=300)
 
-    def _verify(self, token: str) -> dict[str, Any]:
+    def _verify(self, token: str, role: str | None) -> dict[str, Any]:
         try:
             key = self._jwks.get_signing_key_from_jwt(token).key
             claims = jwt.decode(
@@ -43,10 +42,11 @@ class OIDCVerifier:
         if self.client_ids and claims.get("azp") not in self.client_ids:
             raise OIDCError("Login token was issued to another application.")
         roles = (claims.get("realm_access") or {}).get("roles") or []
-        if self.required_role and self.required_role not in roles:
-            raise OIDCError(f"Your account lacks the '{self.required_role}' role.", status_code=403)
+        if role and role not in roles:
+            raise OIDCError(f"Your account lacks the '{role}' role.", status_code=403)
         return claims
 
-    async def verify(self, token: str) -> dict[str, Any]:
+    async def verify(self, token: str, role: str | None) -> dict[str, Any]:
+        """Claims of a valid token whose account has `role` (a realm role)."""
         # Fetching the signing keys is blocking I/O.
-        return await asyncio.to_thread(self._verify, token)
+        return await asyncio.to_thread(self._verify, token, role)

@@ -12,6 +12,10 @@
       {
         "name": "moose-user",
         "description": "May create a Moose vault and bring their own LLM provider keys."
+      },
+      {
+        "name": "moose-admin",
+        "description": "Administers Moose: shared models, invitations, schema changes."
       }
     ]
   },

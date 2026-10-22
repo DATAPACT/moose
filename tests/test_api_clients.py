@@ -6,17 +6,19 @@ from fastapi.testclient import TestClient
 from moose.config import get_settings
 from moose.llm import OpenAICompatibleClient
 from moose_api.main import app
+from oidc_helpers import ISSUER, admin_login, bearer, login_token
 
-ADMIN_KEY = "admin-key"
+SHARED_KEY = "shared-key-for-external-users"
 SHARED = ["openai/gpt-oss-120b", "minimax/minimax-m3.1-flash:free"]
 PROVIDER_KEY = "sk-or-v1-user-owned-provider-key-0123456789"
 OPERATOR_KEY = "sk-or-v1-operator-shared-key-9876543210"
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch):
+def client(monkeypatch: pytest.MonkeyPatch, test_signing_key):
     env = {
-        "MOOSE_API_KEY": ADMIN_KEY,
+        "MOOSE_API_KEY": SHARED_KEY,
+        "MOOSE_OIDC_ISSUER": ISSUER,
         "MOOSE_SECRET_KEY": "server-secret-for-tests",
         "MOOSE_MONGO_URL": "",
         "MOOSE_WORKER_COUNT": "0",
@@ -25,7 +27,7 @@ def client(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()
     with TestClient(app) as test_client:
-        headers = {"X-API-Key": ADMIN_KEY}
+        headers = admin_login()
         assert test_client.put(
             "/admin/shared-models/key", json={"provider": "openrouter", "api_key": OPERATOR_KEY}, headers=headers
         ).status_code == 200
@@ -37,7 +39,11 @@ def client(monkeypatch: pytest.MonkeyPatch):
 
 
 def _admin() -> dict[str, str]:
-    return {"X-API-Key": ADMIN_KEY}
+    return admin_login()
+
+
+def _shared() -> dict[str, str]:
+    return {"X-API-Key": SHARED_KEY}
 
 
 def _register(client: TestClient, name: str) -> dict[str, str]:
@@ -161,8 +167,9 @@ def test_schema_changes_need_admin_key(client: TestClient) -> None:
         ("post", "/schemas/ingest/preview"),
         ("post", "/admin/invites"),
     ]:
-        resp = client.request(method, path, json={}, headers={"X-API-Key": user["token"]})
-        assert resp.status_code == 403, (method, path, resp.status_code)
+        for caller in ({"X-API-Key": user["token"]}, _shared(), bearer(login_token(["moose-user"]))):
+            resp = client.request(method, path, json={}, headers=caller)
+            assert resp.status_code in (401, 403), (method, path, caller, resp.status_code)
     assert client.post("/schemas/reload", headers=_admin()).status_code == 200
 
 
@@ -205,7 +212,8 @@ async def test_worker_calls_the_users_provider_with_their_key(monkeypatch: pytes
 def test_shared_models_are_admin_only_and_key_stays_encrypted(client: TestClient) -> None:
     user = _register(client, "Partner A")
     for method, path in [("get", "/admin/shared-models"), ("put", "/admin/shared-models"), ("put", "/admin/shared-models/key")]:
-        assert client.request(method, path, json={}, headers={"X-API-Key": user["token"]}).status_code == 403
+        for caller in ({"X-API-Key": user["token"]}, _shared(), bearer(login_token(["moose-user"]))):
+            assert client.request(method, path, json={}, headers=caller).status_code in (401, 403), (path, caller)
 
     described = client.get("/admin/shared-models", headers=_admin()).json()
     assert described["models"] == SHARED and described["default_model"] == SHARED[0]
@@ -217,8 +225,13 @@ def test_shared_models_are_admin_only_and_key_stays_encrypted(client: TestClient
     assert bad_default.status_code == 400
 
 
-def test_shared_key_needs_a_server_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key, value in {"MOOSE_API_KEY": ADMIN_KEY, "MOOSE_MONGO_URL": "", "MOOSE_WORKER_COUNT": "0"}.items():
+def test_shared_key_needs_a_server_secret(monkeypatch: pytest.MonkeyPatch, test_signing_key) -> None:
+    for key, value in {
+        "MOOSE_API_KEY": SHARED_KEY,
+        "MOOSE_OIDC_ISSUER": ISSUER,
+        "MOOSE_MONGO_URL": "",
+        "MOOSE_WORKER_COUNT": "0",
+    }.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("MOOSE_SECRET_KEY", raising=False)
     get_settings.cache_clear()
@@ -229,7 +242,7 @@ def test_shared_key_needs_a_server_secret(monkeypatch: pytest.MonkeyPatch) -> No
             )
             assert resp.status_code == 400 and "MOOSE_SECRET_KEY" in resp.json()["detail"]
             # Without shared models, jobs need the user's own key.
-            assert test_client.post("/schemas/coarse/ner", json={"text": "x"}, headers=_admin()).status_code == 503
+            assert test_client.post("/schemas/coarse/ner", json={"text": "x"}, headers=_shared()).status_code == 503
     finally:
         get_settings.cache_clear()
 
@@ -266,3 +279,32 @@ async def test_worker_runs_shared_models_on_the_operator_key(monkeypatch: pytest
     )
     await pool._process_job("j2")
     assert seen == {"base_url": "https://openrouter.ai/api/v1", "key": OPERATOR_KEY, "model": SHARED[0]}
+
+
+def test_shared_key_uses_shared_models_but_cannot_administer(client: TestClient) -> None:
+    job_id = _submit(client, SHARED_KEY)
+    assert client.get(f"/jobs/{job_id}", headers=_shared()).status_code == 200
+    assert client.get("/models", headers=_shared()).json()["models"] == SHARED
+    assert client.put(
+        "/admin/shared-models", json={"models": ["anthropic/claude-opus-4"]}, headers=_shared()
+    ).status_code == 401
+    assert client.get("/admin/shared-models", headers=_admin()).json()["models"] == SHARED
+
+
+def test_admin_login_can_follow_its_own_jobs(client: TestClient) -> None:
+    resp = client.post("/schemas/coarse/ner", json={"text": "Alice works at Moose."}, headers=_admin())
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    assert client.get(f"/jobs/{job_id}", headers=_admin()).status_code == 200
+    assert client.get(f"/jobs/{job_id}", headers=_shared()).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_shared_key_from_another_secret_must_be_reentered() -> None:
+    from moose_api.shared_models import SharedModelsStore
+
+    old = SharedModelsStore.in_memory("old-secret")
+    await old.set_key("openrouter", OPERATOR_KEY)
+    rotated = SharedModelsStore(old._config, "new-secret")
+    described = await rotated.describe()
+    assert described["key_unreadable"] and described["masked_key"] is None

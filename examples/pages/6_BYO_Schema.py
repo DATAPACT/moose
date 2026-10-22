@@ -7,6 +7,7 @@ from typing import Any
 import streamlit as st
 
 from moose_ui.api import api_post, wait_for_job
+from moose_ui.account import admin_headers, login_configured
 from moose_ui.config import llm_options, sidebar, validate_common
 from moose_ui.metadata import clear_metadata_caches, fetch_schemas
 from moose_ui.render import render_job
@@ -141,8 +142,13 @@ err = validate_common(cfg)
 if err:
     st.warning(err)
 
-if not cfg.get("api_key"):
-    st.info("Enter your Moose API key in the sidebar.")
+# Changing schemas is administration: it needs a login with the admin role.
+if not login_configured():
+    st.error("Account login is not configured on this server, so schemas cannot be changed here.")
+    st.stop()
+if not st.user.is_logged_in:
+    st.write("Log in with an administrator account to add or change schemas.")
+    st.button("Log in", type="primary", on_click=st.login)
     st.stop()
 
 st.caption("Workflow: preview mapping and extracted types first, then activate schema.")
@@ -244,10 +250,10 @@ with action_left:
         try:
             preview_resp = api_post(
                 cfg["base_url"],
-                cfg["api_key"],
+                "",
                 "/schemas/ingest/preview",
                 payload,
-                {},
+                admin_headers(),
             )
         except Exception as exc:  # noqa: BLE001
             st.error(str(exc))
@@ -294,10 +300,10 @@ with action_right:
         try:
             resp = api_post(
                 cfg["base_url"],
-                cfg["api_key"],
+                "",
                 "/schemas/ingest",
                 activate_payload,
-                {},
+                admin_headers(),
             )
         except Exception as exc:  # noqa: BLE001
             st.error(str(exc))
@@ -309,7 +315,7 @@ with action_right:
         st.json(resp)
 
         if auto_poll and job_id:
-            final = wait_for_job(cfg["base_url"], cfg["api_key"], job_id)
+            final = wait_for_job(cfg["base_url"], "", job_id, headers=admin_headers())
             render_job(
                 final,
                 show_raw=cfg.get("show_raw", False),
