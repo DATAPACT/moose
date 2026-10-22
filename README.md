@@ -228,10 +228,12 @@ client and the `moose-user` role) and links one vault to each account.
 
 Production, with an existing Keycloak:
 
-1. Create the realm from [`deploy/keycloak/moose-realm.json`](deploy/keycloak/moose-realm.json),
-   changing the client's redirect URI and web origin to the dashboard's public
-   URL (for example `https://moose-ui.example.org/oauth2callback`), and set a
-   client secret.
+1. Create the realm from [`deploy/keycloak/moose-realm-zooverse.json`](deploy/keycloak/moose-realm-zooverse.json)
+   (*Create realm → Resource file*). It holds two clients: `moose-dashboard` for
+   the deployed dashboard (`https://moose-ui.zooverse.dev`) and
+   `moose-dashboard-dev` for a developer's local dashboard
+   (`http://localhost:8502`); adjust the URLs for another host. Copy each
+   client's secret from its *Credentials* tab.
 2. Create users and give them the realm role `moose-user`; give administrators
    the role `moose-admin` (create it if the realm has none).
 3. In the env file set `MOOSE_OIDC_ISSUER` (for example
@@ -241,7 +243,9 @@ Production, with an existing Keycloak:
    `MOOSE_DASHBOARD_OIDC_CLIENT_SECRET` and a random
    `MOOSE_DASHBOARD_COOKIE_SECRET`, then rerun `./scripts/deploy.sh`.
 
-Locally, `./scripts/dev_keycloak.sh` starts a stand-in Keycloak on
+To develop against the real Keycloak, set `MOOSE_DASHBOARD_OIDC_CLIENT_ID=moose-dashboard-dev`
+with that client's secret, and `MOOSE_OIDC_CLIENT_IDS=moose-dashboard,moose-dashboard-dev`.
+Without access to it, `./scripts/dev_keycloak.sh` starts a stand-in Keycloak on
 `http://localhost:8180` with this realm and a test user, and writes the
 settings to `.env` (the test login goes to `data/dev-keycloak.txt`). It is
 for development only: deployment never starts a Keycloak (`docker-compose.yml`

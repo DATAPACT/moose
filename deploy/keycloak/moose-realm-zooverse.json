@@ -1,0 +1,62 @@
+{
+  "realm": "moose",
+  "enabled": true,
+  "displayName": "Moose",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "name": "moose-user",
+        "description": "May create a Moose vault and bring their own LLM provider keys."
+      },
+      {
+        "name": "moose-admin",
+        "description": "Administers Moose: shared models, invitations, schema changes."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "moose-dashboard",
+      "name": "Moose dashboard",
+      "description": "The deployed dashboard at moose-ui.zooverse.dev.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": ["https://moose-ui.zooverse.dev/oauth2callback"],
+      "webOrigins": ["https://moose-ui.zooverse.dev"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://moose-ui.zooverse.dev/*"
+      }
+    },
+    {
+      "clientId": "moose-dashboard-dev",
+      "name": "Moose dashboard (local development)",
+      "description": "A developer's local dashboard on http://localhost:8502.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": ["http://localhost:8502/oauth2callback"],
+      "webOrigins": ["http://localhost:8502"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8502/*"
+      }
+    }
+  ]
+}

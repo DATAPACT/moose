@@ -23,7 +23,12 @@ class OIDCVerifier:
     def __init__(self, issuer: str, jwks_url: str | None, client_ids: list[str]) -> None:
         self.issuer = issuer.rstrip("/")
         self.client_ids = client_ids
-        self._jwks = jwt.PyJWKClient(jwks_url or f"{self.issuer}/protocol/openid-connect/certs", lifespan=300)
+        self._jwks = jwt.PyJWKClient(
+            jwks_url or f"{self.issuer}/protocol/openid-connect/certs",
+            lifespan=300,
+            # Proxies such as Cloudflare reject Python's default "Python-urllib" user agent.
+            headers={"User-Agent": "moose (+https://github.com/DATAPACT/moose)"},
+        )
 
     def _verify(self, token: str, role: str | None) -> dict[str, Any]:
         try:
