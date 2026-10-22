@@ -258,13 +258,18 @@ proxy's network, such as `cloudflare_default`), so it cannot be switched off on
 a server by mistake. Set it back to `true` (the
 default) to use Keycloak; deployment never starts a Keycloak of its own.
 
-- **During a job** the user's provider key is decrypted in memory only, in the
-  process that accepted the job. If Moose restarts first, the job fails with a
-  request to submit it again. Run the API as one process
-  (`MOOSE_WEB_CONCURRENCY=1`).
+- **Jobs are encrypted.** A user's job input (text, table rows), its result and
+  its error details are stored encrypted with their vault key; only the user's
+  own tokens can read them back through `GET /jobs/{id}`. Job status,
+  timestamps, model, tokens and cost stay readable for operations. Jobs made
+  with `MOOSE_API_KEY` or by administrators are not encrypted.
+- **During a job** the user's vault key, and their provider key for jobs on
+  their own key, are held in memory only, in the process that accepted the job.
+  If Moose restarts first, the job fails with a request to submit it again. Run
+  the API as one process (`MOOSE_WEB_CONCURRENCY=1`).
 - **Isolation.** Users see only their own jobs and keys; administrators cannot
-  read users' jobs through the API, use their keys, or list their vault. Users
-  cannot change schemas or create invitations.
+  read users' jobs (not even in the database), use their keys, or list their
+  vault. Users cannot change schemas or create invitations.
 - **Limit.** A modified, malicious server could capture keys while a job runs.
   Users reduce that risk with provider keys made only for Moose, with a small
   budget, the models they need, and an expiry.
