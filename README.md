@@ -255,7 +255,10 @@ Production, with an existing Keycloak:
 
 Locally, `./scripts/dev_keycloak.sh` starts a stand-in Keycloak on
 `http://localhost:8180` with this realm and a test user, and writes the
-settings to `.env` (the test login goes to `data/dev-keycloak.txt`).
+settings to `.env` (the test login goes to `data/dev-keycloak.txt`). It is
+for development only: deployment never starts a Keycloak (`docker-compose.yml`
+has none), and the script refuses to run when the env file already points to
+another Keycloak.
 
 - **During a job** the user's provider key is decrypted in memory only, in the
   process that accepted the job. If Moose restarts first, the job fails with a

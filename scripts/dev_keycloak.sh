@@ -22,6 +22,15 @@ if [ "${1:-}" = "stop" ]; then
     exit 0
 fi
 
+# Never replace a real account provider: refuse if the env file already points
+# Moose at another Keycloak (for example the production one on a server).
+configured_issuer="$(sed -n 's/^MOOSE_OIDC_ISSUER=//p' "$ENV_FILE" 2>/dev/null | tail -n 1)"
+if [ -n "$configured_issuer" ] && [ "$configured_issuer" != "http://localhost:$PORT/realms/moose" ]; then
+    echo "Refusing: $ENV_FILE already uses the account provider $configured_issuer." >&2
+    echo "This script is for local development only and would overwrite that setting." >&2
+    exit 1
+fi
+
 random() { python3 -c "import secrets; print(secrets.token_urlsafe(24))"; }
 
 set_env() {
