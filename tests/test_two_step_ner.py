@@ -450,3 +450,17 @@ async def test_one_step_text_gets_its_probability_from_laya(monkeypatch: pytest.
     [entity] = (await run_text_ner([{"task_id": "t", "text": "Maria lives in Milan."}], "coarse", llm))["results"][0]["entities"]
     assert (entity["type_id"], entity["confidence"], entity["decided_by"]) == ("PERSON", 0.8, "llm")
     assert '"scores"' not in llm.prompts[0] and fake.calls == [("Maria", "person")]
+
+
+def test_only_checked_linkers_count_as_calibrated(tmp_path) -> None:
+    from moose.linkers import Calibration
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps({"validated_for": ["text"], "calibrators": {
+        "system1": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": ["text"]},
+        "llm": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": []},
+    }}))
+    cal = Calibration.load(path)
+    assert cal.validated_tasks("system1") == ("text",) and cal.validated_tasks("llm") == ()
+    assert cal.validated_tasks("system1+llm") == ("text",)  # raw Laya, covered by the file's validated_for
+    assert cal.probability("one_step", 0.8, "text") == (0.8, False)  # never checked: not calibrated

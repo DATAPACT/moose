@@ -123,12 +123,19 @@ class Calibration:
             known["model"] = override
         return cls(**known)
 
+    def validated_tasks(self, linker: str) -> tuple[str, ...]:
+        """Tasks on which this linker's probabilities were checked against labelled data: its
+        calibrator's, or the file's validated_for for Laya's own raw decisions only."""
+        calibrator = dict(self.calibrators).get(linker)
+        if calibrator is not None:
+            return calibrator.validated_for
+        return self.validated_for if linker in SYSTEM1_LINKERS else ()
+
     def probability(self, linker: str, raw: float, task: str) -> tuple[float, bool]:
         """The probability to report for a decision, and whether it counts as calibrated."""
         calibrator = dict(self.calibrators).get(linker)
-        if calibrator is not None:
-            return calibrator(raw), task in calibrator.validated_for
-        return raw, linker != "llm" and task in self.validated_for
+        probability = calibrator(raw) if calibrator is not None else raw
+        return probability, task in self.validated_tasks(linker)
 
     def confidence_of(self, probabilities: dict[str, float], chosen: str, candidates: list[dict[str, Any]]) -> float:
         if self.confidence != "family":
