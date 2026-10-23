@@ -8,9 +8,12 @@ adds what it knows. Three linkers:
                calibration's `consult_below`) go to the LLM, whose suggestion is added to
                Laya's input; Laya then decides again. The final probability is Laya's.
   system1      Laya alone; no LLM call for this step.
-  llm          the LLM decides and states its confidence, which is not calibrated
-               (`"calibrated": false`). Laya is not used: on DPVCallBench its probability
-               for the LLM's choice was far too low (ECE 0.23-0.36) to be worth computing.
+  llm          the LLM decides; Laya gives the probability of the LLM's choice.
+
+The LLM never states a probability: LLMs are over-confident (on DPVCallBench, a stated
+0.97 for 77% right). Every probability is Laya's, mapped through the schema's calibrator
+for that linker where one was fitted on labelled data, and marked calibrated only where
+that was checked. Without Laya (the plain library), decisions carry no probability.
 
 On DPVCallBench (two-step `dpv_privacy`), system1+llm with consult_below 0.6 matched or
 beat both Laya and the LLM alone and halved the calibration error, asking the LLM about
@@ -39,8 +42,8 @@ DEFAULT_LAYA_MODEL = "convaiinnovations/laya"
 # but its options share a small token budget.
 LAYA_DEFINITION_CHARS = 140
 
-# ask_llm(items) -> {index in items: (type_id or "none", stated confidence)}, one LLM call.
-AskLLM = Callable[[list[dict[str, Any]]], Awaitable[dict[int, tuple[str, float]]]]
+# ask_llm(items) -> {index in items: type_id or "none"}, one LLM call.
+AskLLM = Callable[[list[dict[str, Any]]], Awaitable[dict[int, str]]]
 
 
 class LinkerUnavailable(RuntimeError):
@@ -53,6 +56,25 @@ def laya_available() -> bool:
     except ImportError:
         return False
     return True
+
+
+@dataclass(frozen=True)
+class Calibrator:
+    """Maps Laya's raw probability to the accuracy observed on labelled data (isotonic
+    regression, stored as increasing [raw, calibrated] points, linearly interpolated)."""
+
+    points: tuple[tuple[float, float], ...]
+    validated_for: tuple[str, ...] = ()
+    fitted_on: str | None = None
+
+    def __call__(self, raw: float) -> float:
+        points = self.points
+        if raw <= points[0][0]:
+            return points[0][1]
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            if raw <= x1:
+                return y0 if x1 == x0 else y0 + (y1 - y0) * (raw - x0) / (x1 - x0)
+        return points[-1][1]
 
 
 @dataclass(frozen=True)
@@ -70,9 +92,11 @@ class Calibration:
     # children's among the candidates, for models trained to spread probability over a type
     # and its finer children (see research/dpv_eval, fine-tuned Laya).
     confidence: str = "top1"
-    # Tasks on which Laya's probabilities were checked against labelled data; elsewhere
-    # they are reported as not calibrated.
+    # Tasks on which Laya's raw probabilities were checked against labelled data (used when
+    # the linker has no calibrator; never for the llm linker).
     validated_for: tuple[str, ...] = ("text",)
+    # Per linker: a calibrator fitted on labelled data (see research/dpv_eval/fit_calibrators.py).
+    calibrators: tuple[tuple[str, Calibrator], ...] = ()
     fitted_on: str | None = None
 
     @classmethod
@@ -81,15 +105,30 @@ class Calibration:
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
         fields = ("model", "model_env", "consult_below", "confidence", "validated_for", "fitted_on")
-        known = {k: data[k] for k in fields if k in data}
+        known: dict[str, Any] = {k: data[k] for k in fields if k in data}
         if "validated_for" in known:
             known["validated_for"] = tuple(known["validated_for"])
+        known["calibrators"] = tuple(
+            (linker, Calibrator(
+                points=tuple((float(x), float(y)) for x, y in entry["points"]),
+                validated_for=tuple(entry.get("validated_for") or ()),
+                fitted_on=entry.get("fitted_on"),
+            ))
+            for linker, entry in (data.get("calibrators") or {}).items()
+        )
         if known.get("confidence", "top1") not in CONFIDENCE_MODES:
             raise ValueError(f"{path}: confidence must be one of {', '.join(CONFIDENCE_MODES)}.")
         override = os.getenv(known.get("model_env", "MOOSE_LAYA_MODEL"))
         if override:
             known["model"] = override
         return cls(**known)
+
+    def probability(self, linker: str, raw: float, task: str) -> tuple[float, bool]:
+        """The probability to report for a decision, and whether it counts as calibrated."""
+        calibrator = dict(self.calibrators).get(linker)
+        if calibrator is not None:
+            return calibrator(raw), task in calibrator.validated_for
+        return raw, linker != "llm" and task in self.validated_for
 
     def confidence_of(self, probabilities: dict[str, float], chosen: str, candidates: list[dict[str, Any]]) -> float:
         if self.confidence != "family":
@@ -235,7 +274,8 @@ def ranked(probabilities: dict[str, float], top: int = 3) -> list[dict[str, Any]
 @dataclass
 class Decision:
     type_id: str  # or "none"
-    confidence: float
+    # The probability that type_id is right (Laya's); None when Laya is not available.
+    confidence: float | None
     # "system1", "system1+llm" (System 1 after consulting the LLM) or "llm"
     decided_by: str
     calibrated: bool
@@ -254,14 +294,18 @@ async def decide(
 ) -> list[Decision]:
     """Choose a type for each item. Each item has `text`, optionally `category`, and
     `candidates`: records with `id`, `label` and `definition`. `task` ("text", "table")
-    says whether Laya's probabilities count as calibrated (see Calibration.validated_for)."""
+    selects which validations apply. Every probability comes from Laya."""
     if not items:
         return []
     system1 = system1_ready(calibration)
-    validated = system1 and task in calibration.validated_for
     if linker in SYSTEM1_LINKERS and not system1:
         failure = _recent_failure(calibration.model) if calibration else None
         raise LinkerUnavailable(failure or "This linker needs Laya and the schema's calibration; use the llm linker.")
+
+    def decision(chosen: str, probabilities: dict[str, float], decided_by: str, i: int, suggestion: str | None = None) -> Decision:
+        raw = calibration.confidence_of(probabilities, chosen, items[i]["candidates"])
+        probability, calibrated = calibration.probability(linker, raw, task)
+        return Decision(chosen, probability, decided_by, calibrated, probabilities, suggestion)
 
     decisions: list[Decision | None] = [None] * len(items)
     to_llm = list(range(len(items)))
@@ -271,38 +315,42 @@ async def decide(
         to_llm = []
         for i, probabilities in enumerate(plain):
             best = max(probabilities, key=probabilities.get)
-            confidence = calibration.confidence_of(probabilities, best, items[i]["candidates"])
-            decisions[i] = Decision(best, confidence, "system1", validated, probabilities)
-            if linker == "system1+llm" and confidence < calibration.consult_below:
+            decisions[i] = decision(best, probabilities, "system1", i)
+            if linker == "system1+llm" and calibration.confidence_of(probabilities, best, items[i]["candidates"]) < calibration.consult_below:
                 to_llm.append(i)
     if not to_llm:
         return decisions  # type: ignore[return-value]
 
     answers = await ask_llm([items[i] for i in to_llm])
-    choices = {i: answers.get(j, ("none", 0.0)) for j, i in enumerate(to_llm)}
+    choices = {i: answers.get(j, "none") for j, i in enumerate(to_llm)}
     labels = {
         i: next(c.get("label") or c["id"] for c in items[i]["candidates"] if c["id"] == choice)
-        for i, (choice, _) in choices.items()
+        for i, choice in choices.items()
         if choice != "none"
     }
-    if linker == "llm":
-        for i, (choice, stated) in choices.items():
-            decisions[i] = Decision(choice, stated if choice != "none" else 0.0, "llm", False)
-        return decisions  # type: ignore[return-value]
 
+    # Laya scores the candidates again, given the LLM's choice: it decides again
+    # (system1+llm), or gives the probability of the LLM's choice (llm).
     hinted: dict[int, dict[str, float]] = {}
-    if labels:  # system1+llm: Laya decides again, given the LLM's suggestion
+    if system1 and labels:
         consulted = sorted(labels)
-        scorer = await get_scorer(calibration.model)
-        scores = await scorer.score(context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt)
-        hinted = dict(zip(consulted, scores))
+        try:
+            scorer = await get_scorer(calibration.model)
+        except LinkerUnavailable:
+            if linker != "llm":
+                raise
+            scorer = None  # the LLM's choice stands, without a probability
+        if scorer is not None:
+            scores = await scorer.score(context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt)
+            hinted = dict(zip(consulted, scores))
 
-    for i, (choice, stated) in choices.items():
-        if i in hinted:  # system1+llm: Laya decides again, with the LLM's suggestion
+    for i, choice in choices.items():
+        if choice == "none":
+            # The LLM found no candidate that fits (for system1+llm: Laya was unsure too).
+            decisions[i] = Decision("none", None, linker, False)
+        elif linker == "llm":
+            decisions[i] = decision(choice, hinted[i], "llm", i, labels[i]) if i in hinted else Decision(choice, None, "llm", False)
+        else:
             best = max(hinted[i], key=hinted[i].get)
-            confidence = calibration.confidence_of(hinted[i], best, items[i]["candidates"])
-            decisions[i] = Decision(best, confidence, "system1+llm", validated, hinted[i], labels[i])
-        elif choice == "none":
-            # Laya was unsure and the LLM found no candidate that fits: leave the item out.
-            decisions[i] = Decision("none", 0.0, "system1+llm", False)
+            decisions[i] = decision(best, hinted[i], "system1+llm", i, labels[i])
     return decisions  # type: ignore[return-value]

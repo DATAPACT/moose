@@ -7,14 +7,14 @@ import streamlit as st
 LINKER_HELP = {
     "system1+llm": "System 1 + LLM: Laya decides and consults the LLM when unsure",
     "system1": "System 1 only: Laya decides, no extra LLM call",
-    "llm": "LLM: the LLM decides; its stated confidence is not calibrated",
+    "llm": "LLM: the LLM decides; Laya gives the probability of its choice",
 }
 
 
 def linker_picker(schema_info: dict[str, Any], *, key: str, item: str = "item", task: str = "text") -> str | None:
     """The linker for a two-step schema, chosen among those the API server can run; None otherwise."""
     if schema_info.get("candidate_mode") != "two_step":
-        st.caption("One-step schema: the LLM sees all of the schema's types and decides, without the System 1 model.")
+        st.caption("One-step schema: the LLM sees all of the schema's types and decides; Laya gives the probability.")
         return None
     st.caption(
         f"Two-step schema: the LLM first finds and describes each {item}, then a few candidate types are "
@@ -30,7 +30,10 @@ def linker_picker(schema_info: dict[str, Any], *, key: str, item: str = "item", 
         key=key,
     )
     if available == ["llm"]:
-        st.caption("The System 1 model (Laya) is not installed on this API server, so only the LLM linker is available.")
+        st.caption(
+            "The System 1 model (Laya) is not installed on this API server: only the LLM linker is available, "
+            "and results carry no probability."
+        )
     elif task not in schema_info.get("system1_validated_for", [task]):
         st.caption(
             f"Laya's probabilities for this schema's {task} annotations have not been checked against "
@@ -58,8 +61,9 @@ def decision_fields(item: dict[str, Any]) -> dict[str, Any]:
 
 def decision_caption() -> None:
     st.caption(
-        "confidence: the System 1 model's probability that the type is right; it counts as calibrated "
-        "where it was checked against labelled data (calibrated = true). decided_by: system1 (Laya alone), "
-        "system1+llm (Laya after the LLM's suggestion, shown in llm_suggestion) or llm. "
-        "category: how the LLM described it. ranking: Laya's top candidates."
+        "confidence: the probability that the type is right, always from the System 1 model (Laya), never from "
+        "the LLM, which tends to be over-confident. calibrated = true where that probability was checked against "
+        "labelled data; empty when Laya is not available on the server. decided_by: system1 (Laya alone), "
+        "system1+llm (Laya after the LLM's suggestion, shown in llm_suggestion) or llm (the LLM chose; Laya "
+        "scored its choice). category: how the LLM described it. ranking: Laya's top candidates."
     )

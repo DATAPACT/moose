@@ -176,7 +176,7 @@ def render_text_ner_result(result: dict[str, Any], *, show_raw: bool) -> None:
                     "type_group": _entity_type_group(ent.get("type_id")),
                     "coarse_type_id": ent.get("coarse_type_id"),
                     "confidence": ent.get("confidence"),
-                    **decision_fields(ent),  # two-step schemas only
+                    **decision_fields(ent),  # how the type was decided, and by whom its probability
                 }
             )
 
@@ -270,7 +270,7 @@ def render_tabular_annotate_result(result: dict[str, Any], *, show_raw: bool) ->
                     "fine_type_id": col.get("fine_type_id"),
                     "confidence": col.get("confidence"),
                     "fine_confidence": col.get("fine_confidence"),
-                    **decision_fields(col),  # two-step schemas only
+                    **decision_fields(col),  # how the type was decided, and by whom its probability
                 }
             )
         if rows:

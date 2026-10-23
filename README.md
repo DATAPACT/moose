@@ -316,59 +316,68 @@ A request can choose who decides with `"linker"`:
 
 | `linker` | Who decides | LLM calls |
 |---|---|---|
-| `system1+llm` (default with Laya) | Laya, consulting the LLM when unsure | 1, plus 1 when any item is unsure |
+| `system1+llm` (default) | Laya, consulting the LLM when unsure | 1, plus 1 when any item is unsure |
 | `system1` | Laya alone | 1 |
-| `llm` (default without Laya, and for `dpv`) | The LLM, with its own stated confidence (not calibrated); Laya is not used | 2 |
+| `llm` (default for `dpv`) | The LLM; Laya scores its choice | 2 |
+
+**Probabilities always come from the System 1 model, never from the LLM.** LLMs are
+over-confident: on DPVCallBench, the LLM's stated confidence averaged 0.97 when it was
+right 77% of the time. So the LLM is never asked for a number. Laya scores every decision:
+- its own;
+- the LLM's choice, given that choice, when the LLM decides;
+- for one-step schemas (`sti`, `schemaorg_cta_v1`), the type the LLM chose, against a few
+  retrieved neighbours.
+
+Each schema's calibration file then maps Laya's raw probability, per linker, to the
+accuracy observed on labelled data. A result says `"calibrated": true` only where that
+mapping was checked. Without Laya (the library without `moose[laya]`, or an image built
+with `MOOSE_EXTRAS=""`), results have no probability (`"confidence": null`).
 
 Each entity or column reports:
-- `confidence`;
-- `calibrated`: whether Laya's probabilities were checked against labelled data for this
-  task;
+- `confidence`: the probability;
+- `calibrated`;
 - `decided_by`;
 - `llm_suggestion`, when the LLM was consulted;
 - `category`: the LLM's description;
 - `candidates`;
 - `ranking`: Laya's top 3.
 
-On DPVCallBench (train and dev, 1,093 mentions with the right span), the default:
-- picks the right concept 80.1% of the time, against 77.1% for the LLM alone and 79.0% for
-  Laya alone;
-- has a mean confidence of 0.801, so its calibration error is 0.03 (0.20 for the LLM's
-  stated confidence);
-- asks the LLM about 16% of mentions.
+Calibration was fitted on DPVCallBench (train, dev and test) and checked with 5-fold
+cross-validation that holds out whole template families. Values are held-out ECE, where
+lower is better and ✓ means validated (0.10 or less):
 
-Each schema has its own calibration file, fitted on DPVCallBench dev:
+| Schema | Default | `system1` | `system1+llm` | `llm` |
+|---|---|---|---|---|
+| `dpv_privacy` | system1+llm, consulting below 0.6 | 0.075 ✓ | 0.052 ✓ | 0.097 ✓ |
+| `dpv_pd` | Laya alone (never consults) | 0.067 ✓ | 0.067 ✓ | 0.104 |
+| `dpv` | llm | 0.254 | 0.238 | 0.154 |
 
-| Schema | Default linker | Consult below | Probabilities validated |
-|---|---|---|---|
-| `dpv_privacy` | System 1 + LLM | 0.6 | text |
-| `dpv_pd` | System 1 + LLM | 0.9 | no |
-| `dpv` | LLM, always two-step | – | no |
+Laya is zero-shot throughout. It chooses badly among `dpv`'s 8,000+ concepts (55–60%
+right, against 78% for the LLM), so `dpv` lets the LLM decide, always in two steps. That
+beats one-step `dpv` (span + concept F1 0.50 against 0.37) at about 1/11 of the cost.
+Against one-step `dpv`, two-step costs about 1/20 as much on DPVCallBench dev (about 1,100
+prompt tokens per text instead of 98,000).
 
-Zero-shot Laya chooses badly among `dpv`'s 8,000+ concepts: 55% right, against 77% for
-the LLM. Two-step `dpv` with the LLM deciding still beats one-step `dpv` (span + concept
-F1 0.50 against 0.37), at about 1/11 of the cost.
+Tables, `coarse` and `fine` have no labelled data yet: Laya still gives every probability,
+marked `"calibrated": false` until a labelled set exists. Column relationships (CPA) and
+cell-level NER still use the LLM's own scores; moving them to the System 1 model is next.
 
-Against `dpv`, two-step costs about 1/20 as much on dev (about 1,100 prompt tokens per text
-instead of 98,000) and scores higher: span + concept F1 0.63 against 0.37. Table
-probabilities are reported with `"calibrated": false` until they are checked on labelled
-tables.
-
-Laya is optional. Build the API image with `MOOSE_EXTRAS=laya` in `.env`, which adds CPU
-PyTorch, about 1 GB. Its model, about 800 MB, downloads into a Docker volume on first use.
-`MOOSE_LAYA_MODEL` points to another checkpoint, for example a fine-tuned folder.
+The API image includes Laya by default (`MOOSE_EXTRAS=laya`, CPU PyTorch, about 1 GB). Its
+model, about 800 MB, downloads into a Docker volume on first use. `MOOSE_LAYA_MODEL` points
+to another checkpoint.
 
 Any schema can use this mode through its registry entry:
 - `"candidate_mode": "two_step"`;
 - `"candidate_k"`: retrieved candidates per item, 8 by default;
 - `"mention_guidance"`: what to look for, in plain words;
 - `"linker"`;
-- `"linker_calibration"`: the Laya checkpoint, the consult threshold, and the tasks it was
-  validated for.
+- `"linker_calibration"`: the Laya checkpoint, the consult threshold, and the calibrators
+  per linker, with the tasks each was validated for.
 
 It works best when the type source gives each type a label, a definition and optionally
 its `parents`. `scripts/build_dpv_privacy_subset.py` rebuilds the DPV subset, and
-`research/dpv_eval/fit_system1.py` refits the threshold.
+`research/dpv_eval/fit_system1.py` refits the threshold and `fit_calibrators.py` the
+calibrators.
 
 ### 3) Table annotation (schema-specific)
 

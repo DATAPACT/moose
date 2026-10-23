@@ -65,7 +65,7 @@ def test_two_step_schema_offers_the_server_linkers_and_sends_the_choice(app) -> 
     table = page.dataframe[0].value
     assert {"confidence", "calibrated", "decided_by", "llm_suggestion", "category", "ranking"} <= set(table.columns)
     assert table.iloc[0]["ranking"] == "dpv-pd:Name 0.70 · dpv-pd:Identifier 0.20"
-    assert any("System 1 model's probability" in c.value for c in page.caption)
+    assert any("always from the System 1 model (Laya), never from the LLM" in c.value for c in page.caption)
 
 
 def test_one_step_schema_has_no_linker(app) -> None:
