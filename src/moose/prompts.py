@@ -444,3 +444,142 @@ def build_table_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: list[s
             f"{json.dumps(payload, ensure_ascii=True)}",
         ]
     )
+
+
+# Extra span rules come from the schema's registry entry ("mention_rules"); none by default.
+DEFAULT_MENTION_RULES: tuple[str, ...] = ()
+
+
+def build_mention_prompt(schema: SchemaConfig, text: str) -> str:
+    """Two-step mode, step 1: find mentions and describe each one, without a type list."""
+    guidance = schema.mention_guidance or schema.description or f"concepts of the {schema.label} vocabulary"
+    lines = [
+        _format_intro(schema.text_intro).strip(),
+        "",
+        "TASK",
+        f"Find every span in the input text that denotes: {guidance}",
+        "For each span, give a short generic category (2-6 words) saying what kind of thing it is,",
+        'for example "customer identifier", "medical condition" or "company receiving the data".',
+        "",
+        "SPAN RULES",
+        '- The span is the value itself, without cue words or field names before it (e.g. "USR 661 204", not "Customer ID USR 661 204").',
+        "- Do not include trailing unit words that are not part of the value (e.g. \"seventy two\", not \"seventy two years old\").",
+        "- Split a value into separate spans when its parts are different kinds of data (e.g. a street address and its postal code).",
+        "- Spans must not overlap.",
+        *[f"- {rule}" for rule in (schema.mention_rules or DEFAULT_MENTION_RULES)],
+        "",
+        "OUTPUT (API CONTRACT)",
+        "Return ONLY valid JSON. No markdown. No extra text.",
+        "{",
+        '  "mentions": [',
+        '    {"start": <int>, "end": <int>, "text": "<exact substring of the input>", "category": "<short generic category>"}',
+        "  ]",
+        "}",
+        'Return {"mentions": []} if there is nothing to annotate.',
+        "",
+        "INPUT TEXT",
+        json.dumps(text, ensure_ascii=False),
+    ]
+    return "\n".join(lines)
+
+
+def _describe_candidate(record: dict[str, Any], max_definition: int = 220) -> str:
+    definition = (record.get("definition") or "").strip()
+    if len(definition) > max_definition:
+        definition = definition[: max_definition - 1].rstrip() + "…"
+    label = record.get("label") or record["id"]
+    return f"{record['id']} ({label})" + (f": {definition}" if definition else "")
+
+
+def build_candidate_choice_prompt(schema: SchemaConfig, text: str, mentions: list[dict[str, Any]]) -> str:
+    """Two-step mode, step 2: choose each mention's type among its own candidates."""
+    lines = [
+        _format_intro(schema.text_intro).strip(),
+        "",
+        "TASK",
+        "Each mention below was found in the input text. Choose the single type that best fits each mention,",
+        "using ONLY that mention's candidates. Prefer the most specific type that is correct.",
+        'Choose "none" when no candidate fits.',
+        "",
+        "INPUT TEXT",
+        json.dumps(text, ensure_ascii=False),
+        "",
+        "MENTIONS",
+    ]
+    for index, mention in enumerate(mentions):
+        lines.append(f"[{index}] {json.dumps(mention['text'], ensure_ascii=False)} (described as: {mention['category']})")
+        for record in mention["candidates"]:
+            lines.append(f"    - {_describe_candidate(record)}")
+    lines.extend(
+        [
+            "",
+            "OUTPUT (API CONTRACT)",
+            "Return ONLY valid JSON. No markdown. No extra text. One choice per mention:",
+            "{",
+            '  "choices": [',
+            '    {"mention": <index>, "type_id": "<one of its candidate ids, or none>", "confidence": <float in [0,1]>}',
+            "  ]",
+            "}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_column_description_prompt(schema: SchemaConfig, columns: dict[str, list[str]]) -> str:
+    """Two-step mode for tables, step 1: describe each column, without a type list."""
+    guidance = schema.mention_guidance or schema.description or f"concepts of the {schema.label} vocabulary"
+    lines = [
+        _format_intro(schema.table_intro).strip(),
+        "",
+        "TASK",
+        f"For each column of the table below, decide whether its values denote: {guidance}",
+        "For each such column, give a short generic category (2-6 words) saying what its values are,",
+        'for example "customer email addresses", "dates of birth" or "companies receiving the data".',
+        "",
+        "COLUMNS (name: sample values)",
+    ]
+    for name, values in columns.items():
+        lines.append(f"- {json.dumps(name, ensure_ascii=False)}: {' | '.join(values) if values else '(empty)'}")
+    lines.extend(
+        [
+            "",
+            "OUTPUT (API CONTRACT)",
+            "Return ONLY valid JSON. No markdown. No extra text. One entry per column, using its exact name:",
+            "{",
+            '  "columns": [',
+            '    {"column": "<column name>", "relevant": <true|false>, "category": "<short generic category, or empty>"}',
+            "  ]",
+            "}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_column_choice_prompt(schema: SchemaConfig, columns: list[dict[str, Any]]) -> str:
+    """Two-step mode for tables, step 2: choose each column's type among its own candidates."""
+    lines = [
+        _format_intro(schema.table_intro).strip(),
+        "",
+        "TASK",
+        "Choose the single type that best fits the values of each column below, using ONLY that column's",
+        'candidates. Prefer the most specific type that is correct. Choose "none" when no candidate fits.',
+        "",
+        "COLUMNS",
+    ]
+    for index, column in enumerate(columns):
+        lines.append(f"[{index}] {column['text']} (described as: {column['category']})")
+        for record in column["candidates"]:
+            lines.append(f"    - {_describe_candidate(record)}")
+    lines.extend(
+        [
+            "",
+            "OUTPUT (API CONTRACT)",
+            "Return ONLY valid JSON. No markdown. No extra text. One choice per column:",
+            "{",
+            '  "choices": [',
+            '    {"column": <index>, "type_id": "<one of its candidate ids, or none>", "confidence": <float in [0,1]>}',
+            "  ]",
+            "}",
+        ]
+    )
+    return "\n".join(lines)

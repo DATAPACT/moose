@@ -79,6 +79,8 @@ def _unwrap_single_ner_result(result: dict[str, Any]) -> dict[str, Any]:
 def _unwrap_single_tabular_result(result: dict[str, Any]) -> dict[str, Any]:
     item = (result.get("results") or [{}])[0]
     out: dict[str, Any] = {"columns": item.get("columns", [])}
+    if "unannotated_columns" in item:  # two-step schemas
+        out["unannotated_columns"] = item["unannotated_columns"]
     table_id = item.get("table_id")
     if isinstance(table_id, str) and table_id and table_id != _SINGLE_TABLE_ID:
         out["table_id"] = table_id
@@ -392,6 +394,7 @@ class WorkerPool:
                         job.payload["schema"],
                         llm_client,
                         settings=self._settings,
+                        linker=job.payload.get("linker"),
                     )
                     result = _unwrap_single_ner_result(raw)
 
@@ -408,6 +411,7 @@ class WorkerPool:
                         job.payload["schema"],
                         llm_client,
                         settings=self._settings,
+                        linker=job.payload.get("linker"),
                     )
                     result = _unwrap_single_tabular_result(raw)
 

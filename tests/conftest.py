@@ -14,3 +14,12 @@ def test_signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
         key = SIGNING_KEY.public_key()
 
     monkeypatch.setattr(jwt.PyJWKClient, "get_signing_key_from_jwt", lambda self, token: _SigningKey())
+
+
+@pytest.fixture(autouse=True)
+def no_system1_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests run as on a server without Laya (so "auto" schemas annotate in one step and no
+    model is loaded); a test that wants the System 1 path patches it back on."""
+    import moose.linkers
+
+    monkeypatch.setattr(moose.linkers, "laya_available", lambda: False)

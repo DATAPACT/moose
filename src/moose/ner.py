@@ -1,19 +1,37 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
 from urllib.parse import quote, unquote
 
+from moose.candidates import candidate_index
 from moose.config import Settings, get_settings
+from moose.linkers import (
+    SYSTEM1_LINKERS,
+    TABLE_PROMPT,
+    Calibration,
+    Decision,
+    LinkerUnavailable,
+    decide,
+    get_scorer,
+    ranked,
+    system1_ready,
+)
 from moose.prob import choose_argmax
 from moose.prompts import (
+    build_candidate_choice_prompt,
+    build_column_choice_prompt,
+    build_column_description_prompt,
+    build_mention_prompt,
     build_table_prompt,
     build_text_ner_prompt,
     build_tabular_cell_ner_prompt,
 )
 from moose.schema import SchemaConfig, get_schema_config
 from moose.validate import (
+    _repair_offsets,
     extract_json,
     validate_ner_response_with_warnings,
     validate_table_response,
@@ -231,11 +249,24 @@ async def run_text_ner(
     schema: str,
     llm_client,
     settings: Settings | None = None,
+    linker: str | None = None,
 ) -> dict:
+    """`linker` overrides the schema's step-2 linker in two-step mode (see moose.linkers)."""
     settings = settings or get_settings()
     schema_config = get_schema_config(schema)
     if not schema_config.supports_text:
         raise ValueError(f"Schema '{schema}' does not support text annotation.")
+
+    if two_step_active(schema_config, linker):
+        resolved = await _linker_or_fallback(schema_config, linker)
+        if resolved is not None:
+            results = await asyncio.gather(
+                *(_two_step_text_task(task, schema_config, llm_client, settings, resolved) for task in tasks)
+            )
+            return {"results": list(results)}
+        # else: an "auto" schema whose System 1 model cannot be loaded uses the one-step path
+    if linker is not None:
+        raise ValueError(f"Schema '{schema}' annotates in one step; a linker applies only to two-step schemas.")
 
     type_ids = schema_config.load_type_ids()
     require_all_scores = schema_config.require_all_scores
@@ -286,6 +317,236 @@ async def run_text_ner(
     if all_warnings:
         response["warnings"] = all_warnings
     return response
+
+
+def _parse_mentions(raw_text: str, text: str) -> list[dict[str, Any]]:
+    data = extract_json(raw_text)
+    items = data.get("mentions") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError('Expected {"mentions": [...]}.')
+    mentions: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not item["text"].strip():
+            raise ValueError('Each mention needs a non-empty "text".')
+        start, end = item.get("start"), item.get("end")
+        if not (isinstance(start, int) and isinstance(end, int) and text[start:end] == item["text"]):
+            repaired = _repair_offsets(text, start if isinstance(start, int) else 0, 0, item["text"])
+            if repaired is None:
+                continue  # not a substring of the input: drop rather than invent offsets
+            start, end = repaired
+        if any(start < m["end"] and m["start"] < end for m in mentions):
+            continue
+        category = item.get("category")
+        mentions.append({
+            "start": start,
+            "end": end,
+            "text": text[start:end],
+            "category": category.strip() if isinstance(category, str) and category.strip() else "",
+        })
+    return sorted(mentions, key=lambda m: m["start"])
+
+
+def _parse_choices(raw_text: str, mentions: list[dict[str, Any]], key: str = "mention") -> dict[int, tuple[str, float]]:
+    """{"choices": [{<key>: index, "type_id": ..., "confidence": ...}]}; key is "mention" or "column"."""
+    data = extract_json(raw_text)
+    items = data.get("choices") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError('Expected {"choices": [...]}.')
+    chosen: dict[int, tuple[str, float]] = {}
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get(key), int):
+            raise ValueError(f'Each choice needs an integer "{key}".')
+        index, type_id = item[key], item.get("type_id")
+        if not 0 <= index < len(mentions):
+            raise ValueError(f"Choice for unknown {key} {index}.")
+        allowed = {c["id"] for c in mentions[index]["candidates"]}
+        if type_id != "none" and type_id not in allowed:
+            raise ValueError(f'{key.capitalize()} {index}: "{type_id}" is not one of its candidates.')
+        try:
+            confidence = min(max(float(item.get("confidence", 1.0)), 0.0), 1.0)
+        except (TypeError, ValueError):
+            confidence = 1.0
+        chosen[index] = (type_id, confidence)
+    return chosen
+
+
+def two_step_active(schema: SchemaConfig, linker: str | None = None) -> bool:
+    """Whether the schema annotates in two steps for this request. "auto" schemas do when the
+    System 1 model is available, or when the request names a linker."""
+    if schema.candidate_mode == "two_step":
+        return True
+    if schema.candidate_mode == "auto":
+        return linker is not None or system1_ready(Calibration.load(schema.linker_calibration))
+    return False
+
+
+async def _linker_or_fallback(schema: SchemaConfig, requested: str | None) -> str | None:
+    """The linker for a two-step request. When the System 1 model was chosen by default
+    ("auto") but cannot be loaded, fall back: to the one-step path (None) for "auto" schemas,
+    to the LLM linker for two-step ones. A linker the request named is never replaced."""
+    calibration = Calibration.load(schema.linker_calibration)
+    linker = resolve_linker(requested, calibration, schema.linker)
+    if linker in SYSTEM1_LINKERS and requested is None and schema.linker == "auto":
+        try:
+            await get_scorer(calibration.model)
+        except LinkerUnavailable:
+            return None if schema.candidate_mode == "auto" else "llm"
+    return linker
+
+
+def resolve_linker(requested: str | None, calibration: Calibration | None, default: str = "auto") -> str:
+    """The request's linker, else the schema's; "auto" means System 1 with LLM help when Laya is installed."""
+    linker = requested or default
+    if linker == "auto":
+        return "system1+llm" if system1_ready(calibration) else "llm"
+    return linker
+
+
+async def _llm_choices(
+    text: str, mentions: list[dict[str, Any]], schema: SchemaConfig, llm_client, settings: Settings
+) -> dict[int, tuple[str, float]]:
+    if not mentions:
+        return {}
+    return await _run_with_retries(
+        llm_client,
+        build_candidate_choice_prompt(schema, text, mentions),
+        lambda raw: _parse_choices(raw, mentions),
+        settings.MOOSE_MAX_RETRIES,
+    )
+
+
+async def _two_step_text_task(
+    task: dict, schema: SchemaConfig, llm_client, settings: Settings, linker: str | None = None
+) -> dict:
+    """Find and describe mentions, retrieve candidates for each, then choose among them."""
+    text = task["text"]
+    mentions = await _run_with_retries(
+        llm_client, build_mention_prompt(schema, text), lambda raw: _parse_mentions(raw, text), settings.MOOSE_MAX_RETRIES
+    )
+    index = candidate_index(schema)
+    for mention in mentions:
+        mention["candidates"] = index.top_k(f"{mention['category']} {mention['text']}", schema.candidate_k)
+    mentions = [m for m in mentions if m["candidates"]]
+    if not mentions:
+        return {"task_id": task["task_id"], "entities": []}
+
+    calibration = Calibration.load(schema.linker_calibration)
+    linker = resolve_linker(linker, calibration, schema.linker)
+
+    async def ask_llm(items: list[dict[str, Any]]) -> dict[int, tuple[str, float]]:
+        return await _llm_choices(text, items, schema, llm_client, settings)
+
+    decisions = await decide(linker, text, mentions, calibration, ask_llm)
+
+    entities = []
+    for mention, decision in zip(mentions, decisions):
+        if decision.type_id == "none":
+            continue
+        entities.append({
+            "start": mention["start"],
+            "end": mention["end"],
+            "text": mention["text"],
+            **_decision_fields(decision, mention, schema),
+        })
+    return {"task_id": task["task_id"], "entities": entities}
+
+
+def _decision_fields(decision: Decision, item: dict[str, Any], schema: SchemaConfig) -> dict[str, Any]:
+    """The type, its probability and how it was decided, for an entity or a column."""
+    fields: dict[str, Any] = {
+        "type_id": decision.type_id,
+        "confidence": round(decision.confidence, 4),
+        "calibrated": decision.calibrated,
+        "decided_by": decision.decided_by,
+        "category": item["category"],
+        "candidates": [c["id"] for c in item["candidates"]],
+    }
+    if decision.llm_suggestion:
+        fields["llm_suggestion"] = decision.llm_suggestion
+    if decision.probabilities:
+        fields["ranking"] = ranked(decision.probabilities)
+    if schema.coarse_mapping:
+        fields["coarse_type_id"] = schema.coarse_mapping.get(decision.type_id)
+    return fields
+
+
+# Sample values per column shown to the LLM and to Laya.
+_COLUMN_SAMPLES = 5
+
+
+def _column_samples(sampled_rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    columns: dict[str, list[str]] = {}
+    for row in sampled_rows:
+        for name, value in row.items():
+            values = columns.setdefault(str(name), [])
+            text = "" if value is None else str(value).strip()
+            if text and text not in values and len(values) < _COLUMN_SAMPLES:
+                values.append(text[:60])
+    return columns
+
+
+def _parse_column_descriptions(raw_text: str, columns: dict[str, list[str]]) -> dict[str, str]:
+    """{column name: category} for the columns the LLM marked relevant."""
+    data = extract_json(raw_text)
+    items = data.get("columns") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError('Expected {"columns": [...]}.')
+    by_folded = {name.casefold().strip(): name for name in columns}
+    described: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict) or not item.get("relevant"):
+            continue
+        name = by_folded.get(str(item.get("column", "")).casefold().strip())
+        if name is None:
+            continue  # not a column of this table
+        category = item.get("category")
+        described[name] = category.strip() if isinstance(category, str) else ""
+    return described
+
+
+async def _two_step_table_task(
+    task: dict, schema: SchemaConfig, llm_client, settings: Settings, linker: str | None = None
+) -> dict:
+    """Describe the columns, retrieve candidates for the relevant ones, then choose among them."""
+    columns = _column_samples(task["sampled_rows"])
+    described = await _run_with_retries(
+        llm_client,
+        build_column_description_prompt(schema, columns),
+        lambda raw: _parse_column_descriptions(raw, columns),
+        settings.MOOSE_MAX_RETRIES,
+    )
+    index = candidate_index(schema)
+    items = []
+    for name, category in described.items():
+        candidates = index.top_k(f"{category} {name}", schema.candidate_k)
+        if candidates:
+            values = " | ".join(columns[name]) or "(empty)"
+            items.append({"column": name, "text": f"{name}: {values}", "category": category, "candidates": candidates})
+
+    calibration = Calibration.load(schema.linker_calibration)
+    linker = resolve_linker(linker, calibration, schema.linker)
+
+    async def ask_llm(chosen: list[dict[str, Any]]) -> dict[int, tuple[str, float]]:
+        return await _run_with_retries(
+            llm_client,
+            build_column_choice_prompt(schema, chosen),
+            lambda raw: _parse_choices(raw, chosen, key="column"),
+            settings.MOOSE_MAX_RETRIES,
+        )
+
+    decisions = await decide(linker, ", ".join(columns), items, calibration, ask_llm, prompt=TABLE_PROMPT, task="table")
+    annotated = []
+    for item, decision in zip(items, decisions):
+        if decision.type_id != "none":
+            annotated.append({"column": item["column"], **_decision_fields(decision, item, schema)})
+    typed = {c["column"] for c in annotated}
+    return {
+        "task_id": task["task_id"],
+        "table_id": task["table_id"],
+        "columns": annotated,
+        # Columns the LLM found no personal data in, or that matched no type.
+        "unannotated_columns": [name for name in columns if name not in typed],
+    }
 
 
 async def _run_table_annotate_once(
@@ -440,11 +701,23 @@ async def run_table_annotate(
     schema: str,
     llm_client,
     settings: Settings | None = None,
+    linker: str | None = None,
 ) -> dict:
+    """`linker` overrides the schema's linker in two-step mode (see moose.linkers)."""
     settings = settings or get_settings()
     schema_config = get_schema_config(schema)
     if not schema_config.supports_table:
         raise ValueError(f"Schema '{schema}' does not support tabular annotation.")
+    if two_step_active(schema_config, linker):
+        resolved = await _linker_or_fallback(schema_config, linker)
+        if resolved is not None:
+            results = await asyncio.gather(
+                *(_two_step_table_task(task, schema_config, llm_client, settings, resolved) for task in tasks)
+            )
+            return {"results": list(results)}
+        # else: an "auto" schema whose System 1 model cannot be loaded uses the one-step path
+    if linker is not None:
+        raise ValueError(f"Schema '{schema}' annotates in one step; a linker applies only to two-step schemas.")
 
     results_by_id = await _run_table_annotate_once(tasks, schema_config, llm_client, settings)
 

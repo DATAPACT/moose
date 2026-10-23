@@ -1,0 +1,6 @@
+{
+  "model": "convaiinnovations/laya",
+  "consult_below": 0.6,
+  "validated_for": [],
+  "fitted_on": "Not fitted for this schema: zero-shot Laya, with the consult threshold found for dpv_privacy text (research/dpv_eval/fit_system1.py). Probabilities are reported as not calibrated."
+}
