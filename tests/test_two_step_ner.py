@@ -117,15 +117,24 @@ class _FakeLaya:
     """Probabilities by mention text, and by mention text plus the LLM's suggestion.
     Unlisted candidates share what is left. Records every call."""
 
-    def __init__(self, plain: dict[str, dict[str, float]], hinted: dict[str, dict[str, float]] | None = None) -> None:
-        self.plain, self.hinted = plain, hinted or {}
+    def __init__(self, plain: dict[str, dict[str, float]], hinted: dict[str, dict[str, float]] | None = None,
+                 verdicts: dict[str, float] | None = None) -> None:
+        self.plain, self.hinted, self.verdicts = plain, hinted or {}, verdicts or {}
         self.calls: list[tuple[str, str | None]] = []
+
+    async def verify(self, context, items, records, prompt=None):
+        """P(yes) by mention text; records a ("verify", label) call."""
+        out = []
+        for item, record in zip(items, records):
+            self.calls.append((item["text"], f"verify {record.get('label') or record['id']}"))
+            out.append(self.verdicts[item["text"]])
+        return out
 
     async def score(self, context, items, suggestions=None, prompt=None):
         out = []
         for item, suggestion in zip(items, suggestions or [None] * len(items)):
             self.calls.append((item["text"], suggestion))
-            given = (self.hinted if suggestion else self.plain)[item["text"]]
+            given = (self.hinted if suggestion else self.plain).get(item["text"], {})
             ids = [c["id"] for c in item["candidates"]]
             rest = [i for i in ids if i not in given]
             left = max(1.0 - sum(given.values()), 0.0)
@@ -191,13 +200,15 @@ async def test_system1_consults_the_llm_only_when_unsure_and_decides_again(monke
 
 @pytest.mark.asyncio
 async def test_llm_linker_takes_its_probability_from_laya_not_the_llm(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    fake = _FakeLaya(plain={}, hinted={"Luca Bianchi": {"dpv-pd:Name": 0.7}})
+    fake = _FakeLaya(plain={"Luca Bianchi": {"dpv-pd:Name": 0.4}}, verdicts={"Luca Bianchi": 0.7})
     _use_laya(monkeypatch, tmp_path, fake)
     llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.99}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
-    # The LLM's 0.99 is ignored; Laya scores the LLM's choice. No calibrator for llm: not calibrated.
+    # The LLM's 0.99 is ignored; Laya answers yes/no on the LLM's choice, and ranks the
+    # candidates on its own (never told what the LLM chose). Never checked for llm: not calibrated.
     assert (entity["decided_by"], entity["confidence"], entity["calibrated"]) == ("llm", 0.7, False)
-    assert fake.calls == [("Luca Bianchi", "Name")] and '"confidence"' not in llm.prompts[1]
+    assert {"type_id": "dpv-pd:Name", "probability": 0.4} in entity["ranking"]
+    assert fake.calls == [("Luca Bianchi", None), ("Luca Bianchi", "verify Name")] and '"confidence"' not in llm.prompts[1]
 
 
 @pytest.mark.asyncio
@@ -380,58 +391,31 @@ def test_dpv_annotates_in_two_steps_with_the_llm_deciding() -> None:
     assert (dpv.candidate_mode, dpv.linker) == ("two_step", "llm") and two_step_active(dpv)
 
 
-def test_family_confidence_adds_direct_parents_and_children() -> None:
-    from moose.linkers import Calibration
-
-    candidates = [
-        {"id": "dpv-pd:MedicalHealth", "parents": []},
-        {"id": "dpv-pd:Health", "parents": ["dpv-pd:MedicalHealth"]},
-        {"id": "dpv-pd:HealthHistory", "parents": ["dpv-pd:Health"]},
-        {"id": "dpv-pd:Name", "parents": []},
-    ]
-    probabilities = {"dpv-pd:Health": 0.5, "dpv-pd:MedicalHealth": 0.2, "dpv-pd:HealthHistory": 0.2, "dpv-pd:Name": 0.1}
-    family = Calibration(confidence="family").confidence_of(probabilities, "dpv-pd:Health", candidates)
-    assert family == pytest.approx(0.9)  # Health + its parent + its child, not the unrelated Name
-    assert Calibration().confidence_of(probabilities, "dpv-pd:Health", candidates) == 0.5
-
-
 def test_a_calibration_can_name_its_own_model_override(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     from moose.linkers import Calibration
 
     path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"model": "org/fine-tuned", "model_env": "MOOSE_LAYA_DPV_MODEL", "confidence": "family"}))
+    path.write_text(json.dumps({"model": "org/fine-tuned", "model_env": "MOOSE_LAYA_DPV_MODEL"}))
     monkeypatch.setenv("MOOSE_LAYA_MODEL", "/base")
     assert Calibration.load(path).model == "org/fine-tuned"  # the general override does not apply
     monkeypatch.setenv("MOOSE_LAYA_DPV_MODEL", "/local/fine-tuned")
-    fine_tuned = Calibration.load(path)
-    assert (fine_tuned.model, fine_tuned.confidence) == ("/local/fine-tuned", "family")
-    # Schemas without their own variable follow MOOSE_LAYA_MODEL, and keep top-1 confidence.
-    privacy = Calibration.load(get_schema_config("dpv_privacy").linker_calibration)
-    assert (privacy.model, privacy.confidence) == ("/base", "top1")
+    assert Calibration.load(path).model == "/local/fine-tuned"
+    # Schemas without their own variable follow MOOSE_LAYA_MODEL.
+    assert Calibration.load(get_schema_config("dpv_privacy").linker_calibration).model == "/base"
 
 
-def test_an_unknown_confidence_mode_is_rejected(tmp_path) -> None:
-    from moose.linkers import Calibration
-
-    path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"confidence": "families"}))
-    with pytest.raises(ValueError, match="confidence must be one of top1, family"):
-        Calibration.load(path)
-
-
-
-def test_a_calibrator_maps_laya_probabilities_per_linker(tmp_path) -> None:
-    from moose.linkers import Calibration
-
-    path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"validated_for": ["text"], "calibrators": {
-        "llm": {"points": [[0.0, 0.5], [0.5, 0.8], [1.0, 0.95]], "validated_for": ["text"]},
-    }}))
-    cal = Calibration.load(path)
-    assert cal.probability("llm", 0.25, "text") == (pytest.approx(0.65), True)
-    assert cal.probability("llm", 0.25, "table") == (pytest.approx(0.65), False)
-    # No calibrator for system1: Laya's raw probability, validated where the file says so.
-    assert cal.probability("system1", 0.4, "text") == (0.4, True)
+@pytest.mark.asyncio
+async def test_the_llm_choice_is_in_the_ranking_even_below_the_top_3(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    # The LLM picks Laya's fourth type: it joins the ranking, with Laya's own probability.
+    found = [c["id"] for c in candidate_index(get_schema_config("dpv_privacy")).top_k("person name Luca Bianchi", 8)]
+    others = [c for c in found if c != "dpv-pd:Name"][:3]
+    hinted = {others[0]: 0.4, others[1]: 0.3, others[2]: 0.2, "dpv-pd:Name": 0.1}
+    fake = _FakeLaya(plain={"Luca Bianchi": hinted}, verdicts={"Luca Bianchi": 0.3})
+    _use_laya(monkeypatch, tmp_path, fake)
+    llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name"}]})
+    [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
+    assert (entity["type_id"], entity["confidence"]) == ("dpv-pd:Name", 0.3)
+    assert {"type_id": "dpv-pd:Name", "probability": 0.1} in entity["ranking"] and len(entity["ranking"]) == 4
 
 
 @pytest.mark.asyncio
@@ -441,7 +425,7 @@ async def test_one_step_text_gets_its_probability_from_laya(monkeypatch: pytest.
     import moose.ner as ner_module
     from moose.schema import COARSE_TYPES
 
-    fake = _FakeLaya(plain={}, hinted={"Maria": {"PERSON": 0.8}})
+    fake = _FakeLaya(plain={"Maria": {"PERSON": 0.6}}, verdicts={"Maria": 0.8})
     _use_laya(monkeypatch, tmp_path, fake)
     coarse = dataclasses.replace(get_schema_config("coarse"), candidate_mode="all",
                                  linker_calibration=get_schema_config("dpv_privacy").linker_calibration)
@@ -449,18 +433,29 @@ async def test_one_step_text_gets_its_probability_from_laya(monkeypatch: pytest.
     llm = _ScriptedLLM({"entities": [{"start": 0, "end": 5, "text": "Maria", "type_id": "PERSON"}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": "Maria lives in Milan."}], "coarse", llm))["results"][0]["entities"]
     assert (entity["type_id"], entity["confidence"], entity["decided_by"]) == ("PERSON", 0.8, "llm")
-    assert '"scores"' not in llm.prompts[0] and fake.calls == [("Maria", "person")]
+    assert '"scores"' not in llm.prompts[0] and fake.calls == [("Maria", None), ("Maria", "verify person")]
 
 
 def test_only_checked_linkers_count_as_calibrated(tmp_path) -> None:
     from moose.linkers import Calibration
 
     path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"validated_for": ["text"], "calibrators": {
-        "system1": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": ["text"]},
-        "llm": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": []},
+    path.write_text(json.dumps({"validated_for": ["text"], "linkers": {
+        "system1": {"validated_for": ["text", "table"]}, "llm": {"validated_for": []},
     }}))
     cal = Calibration.load(path)
-    assert cal.validated_tasks("system1") == ("text",) and cal.validated_tasks("llm") == ()
-    assert cal.validated_tasks("system1+llm") == ("text",)  # raw Laya, covered by the file's validated_for
-    assert cal.probability("one_step", 0.8, "text") == (0.8, False)  # never checked: not calibrated
+    assert cal.validated_tasks("system1") == ("text", "table") and cal.validated_tasks("llm") == ()
+    assert cal.validated_tasks("system1+llm") == ("text",)  # Laya's own linker: the file's validated_for
+    assert cal.validated_tasks("one_step") == ()  # never checked: not calibrated
+
+
+def test_the_yes_no_question_names_one_type_and_not_the_llm() -> None:
+    from moose.linkers import TABLE_PROMPT, laya_verify_inputs
+
+    record = {"id": "dpv-pd:Name", "label": "Name", "definition": "A person's name."}
+    state, questions = laya_verify_inputs(TEXT, {"text": "Luca Bianchi", "category": "person name"}, record)
+    assert "LLM" not in state and "person name" not in state and '"Luca Bianchi"' in state
+    assert questions["verdict"]["instructions"] == "Is the mention Name?"
+    assert questions["verdict"]["criteria"] == {"yes": "Yes, it is Name: A person's name.", "no": "No, it is not Name"}
+    _, table = laya_verify_inputs("Customer, E-mail", {"text": "E-mail: a@b.c"}, record, TABLE_PROMPT)
+    assert table["verdict"]["instructions"] == "Do the column's values hold Name?"

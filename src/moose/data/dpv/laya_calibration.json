@@ -3,80 +3,18 @@
   "consult_below": 0.8,
   "validated_for": [],
   "fitted_on": "DPVCallBench v0.1 dev (302 mentions with exact gold spans), dpv two-step candidates, LLM openai/gpt-oss-120b; research/dpv_eval/fit_system1.py. At this threshold: accuracy 0.636, ECE 0.268; LLM alone 0.772. Not recommended: dpv's default linker is llm; this threshold applies only when a request asks for system1+llm, which was less accurate than the LLM alone on dev.",
-  "calibrators": {
+  "linkers": {
     "system1": {
-      "points": [
-        [
-          0.0,
-          0.0
-        ],
-        [
-          1.0,
-          1.0
-        ]
-      ],
       "validated_for": [],
-      "fitted_on": "DPVCallBench v0.1 train+dev+test (522 mentions with exact gold spans, 46 template families). Held-out ECE (5 folds by template family): raw 0.254, isotonic 0.307; raw kept. Accuracy 0.567. research/dpv_eval/fit_calibrators.py"
+      "checked_on": "DPVCallBench v0.1 train+dev+test (522 mentions with exact gold spans): accuracy 0.567, ECE 0.254. research/dpv_eval/check_calibration.py"
     },
     "system1+llm": {
-      "points": [
-        [
-          0.0,
-          0.0
-        ],
-        [
-          1.0,
-          1.0
-        ]
-      ],
       "validated_for": [],
-      "fitted_on": "DPVCallBench v0.1 train+dev+test (522 mentions with exact gold spans, 46 template families). Held-out ECE (5 folds by template family): raw 0.238, isotonic 0.286; raw kept. Accuracy 0.602. research/dpv_eval/fit_calibrators.py"
+      "checked_on": "DPVCallBench v0.1 train+dev+test (522 mentions with exact gold spans): accuracy 0.602, ECE 0.238. research/dpv_eval/check_calibration.py"
     },
     "llm": {
-      "points": [
-        [
-          0.0006,
-          0.6
-        ],
-        [
-          0.0407,
-          0.6
-        ],
-        [
-          0.0483,
-          0.6667
-        ],
-        [
-          0.0517,
-          0.6667
-        ],
-        [
-          0.0539,
-          0.72
-        ],
-        [
-          0.3522,
-          0.72
-        ],
-        [
-          0.3533,
-          0.8505
-        ],
-        [
-          0.9668,
-          0.8505
-        ],
-        [
-          0.9675,
-          1.0
-        ],
-        [
-          0.9985,
-          1.0
-        ]
-      ],
       "validated_for": [],
-      "fitted_on": "DPVCallBench v0.1 train+dev+test (522 mentions with exact gold spans, 46 template families). Held-out ECE (5 folds by template family): raw 0.395, isotonic 0.154; isotonic kept. Accuracy 0.784. research/dpv_eval/fit_calibrators.py"
+      "checked_on": "DPVCallBench v0.1 train+dev+test (522 mentions with exact gold spans): accuracy 0.784, ECE 0.176. research/dpv_eval/check_calibration.py"
     }
   }
 }

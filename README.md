@@ -318,19 +318,22 @@ A request can choose who decides with `"linker"`:
 |---|---|---|
 | `system1+llm` (default) | Laya, consulting the LLM when unsure | 1, plus 1 when any item is unsure |
 | `system1` | Laya alone | 1 |
-| `llm` (default for `dpv`) | The LLM; Laya scores its choice | 2 |
+| `llm` (default for `dpv`) | The LLM; Laya answers yes/no on its choice | 2 |
 
 **Probabilities always come from the System 1 model, never from the LLM.** LLMs are
 over-confident: on DPVCallBench, the LLM's stated confidence averaged 0.97 when it was
-right 77% of the time. So the LLM is never asked for a number. Laya scores every decision:
-- its own;
-- the LLM's choice, given that choice, when the LLM decides;
-- for one-step schemas (`sti`, `schemaorg_cta_v1`), the type the LLM chose, against a few
-  retrieved neighbours.
+right 77% of the time. So the LLM is never asked for a number. Laya gives every probability:
+- for its own decisions (`system1`, `system1+llm`): the chosen type's probability, exactly as
+  it appears in `ranking`;
+- for the LLM's (`llm`, and one-step schemas such as `sti` and `schemaorg_cta_v1`): Laya's
+  P(yes) to a plain question, "Is the mention <type>?", with that type's definition and
+  nothing about the LLM. `ranking` then shows Laya's own choice among the candidates, so
+  the two can differ: a high P(yes) with the LLM's type low in `ranking` means Laya accepts
+  the type but would rank another higher.
 
-Each schema's calibration file then maps Laya's raw probability, per linker, to the
-accuracy observed on labelled data. A result says `"calibrated": true` only where that
-mapping was checked. Without Laya (the library without `moose[laya]`, or an image built
+Nothing remaps these probabilities. A result says `"calibrated": true` only where the schema's
+calibration file records that this linker's probabilities matched accuracy on labelled
+data. Without Laya (the library without `moose[laya]`, or an image built
 with `MOOSE_EXTRAS=""`), results have no probability (`"confidence": null`).
 
 Each entity or column reports:
@@ -340,17 +343,21 @@ Each entity or column reports:
 - `llm_suggestion`, when the LLM was consulted;
 - `category`: the LLM's description;
 - `candidates`;
-- `ranking`: Laya's top 3.
+- `ranking`: Laya's own top 3, plus the chosen type when the LLM chose one ranked lower.
 
-Calibration was fitted on DPVCallBench (train, dev and test) and checked with 5-fold
-cross-validation that holds out whole template families. Values are held-out ECE, where
+Calibration was checked on DPVCallBench (train, dev and test pooled). Values are ECE, where
 lower is better and ✓ means validated (0.10 or less):
 
 | Schema | Default | `system1` | `system1+llm` | `llm` |
 |---|---|---|---|---|
-| `dpv_privacy` | system1+llm, consulting below 0.6 | 0.075 ✓ | 0.052 ✓ | 0.097 ✓ |
-| `dpv_pd` | Laya alone (never consults) | 0.067 ✓ | 0.067 ✓ | 0.104 |
-| `dpv` | llm | 0.254 | 0.238 | 0.154 |
+| `dpv_privacy` | system1+llm, consulting below 0.6 | 0.075 ✓ | 0.052 ✓ | 0.133 |
+| `dpv_pd` | Laya alone (never consults) | 0.067 ✓ | 0.067 ✓ | 0.219 |
+| `dpv` | llm | 0.254 | 0.238 | 0.176 |
+
+The yes/no question replaced scoring the LLM's choice with the LLM's suggestion in Laya's
+input, which was under-confident and barely told right from wrong (ECE 0.21–0.40). The
+yes/no P(yes) separates them far better but runs high (about 0.9 on average), so `llm`
+results are still reported as not calibrated.
 
 Laya is zero-shot throughout. It chooses badly among `dpv`'s 8,000+ concepts (55–60%
 right, against 78% for the LLM), so `dpv` lets the LLM decide, always in two steps. That
@@ -371,13 +378,13 @@ Any schema can use this mode through its registry entry:
 - `"candidate_k"`: retrieved candidates per item, 8 by default;
 - `"mention_guidance"`: what to look for, in plain words;
 - `"linker"`;
-- `"linker_calibration"`: the Laya checkpoint, the consult threshold, and the calibrators
-  per linker, with the tasks each was validated for.
+- `"linker_calibration"`: the Laya checkpoint, the consult threshold, and per linker the
+  tasks its probabilities were validated for.
 
 It works best when the type source gives each type a label, a definition and optionally
 its `parents`. `scripts/build_dpv_privacy_subset.py` rebuilds the DPV subset, and
-`research/dpv_eval/fit_system1.py` refits the threshold and `fit_calibrators.py` the
-calibrators.
+`research/dpv_eval/fit_system1.py` refits the threshold, `verify_choice.py` caches Laya's yes/no
+answers, and `check_calibration.py` rechecks each linker's calibration.
 
 ### 3) Table annotation (schema-specific)
 
