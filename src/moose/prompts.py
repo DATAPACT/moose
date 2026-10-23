@@ -113,6 +113,30 @@ def build_cpa_prompt(schema: SchemaConfig, task: dict[str, Any], relation_ids: l
 TYPE_SELECT_INTRO = "You are a type inventory selector for semantic typing."
 
 
+# Speaker labels in transcripts ("Agent:", "Customer:") say who talks; they are not mentions.
+SPEAKER_LABEL_RULE = 'Do not annotate speaker labels that only mark who is talking (e.g. "Agent:", "Customer:").'
+# Up to this many types, the one-step prompt also gives each type's definition; beyond it
+# the list of ids alone is already long (dpv has 9,000+).
+MAX_DEFINED_TYPES = 60
+
+
+def _type_definition_lines(schema: SchemaConfig, type_ids: list[str]) -> list[str]:
+    if len(type_ids) > MAX_DEFINED_TYPES:
+        return []
+    try:
+        records = {r["id"]: r for r in schema.load_type_records()}
+    except (OSError, ValueError):
+        return []
+    lines = []
+    for type_id in type_ids:
+        record = records.get(type_id) or {}
+        definition = (record.get("definition") or "").strip()
+        if definition:
+            label = record.get("label") or type_id
+            lines.append(f"- {type_id}" + (f" ({label})" if label != type_id else "") + f": {definition}")
+    return ["", "TYPE DEFINITIONS", *lines] if lines else []
+
+
 def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: list[str]) -> str:
     is_single = len(tasks) == 1
     payload = tasks[0]["text"] if is_single else [t["text"] for t in tasks]
@@ -247,6 +271,7 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
             "ALLOWED LABEL SPACE",
             '"scores" keys MUST be ONLY from this allowed set (no other keys permitted):',
             allowed_json,
+            *_type_definition_lines(schema, type_ids),
             "",
             "SPAN RULES (NER BEST PRACTICES)",
             "- Offsets are computed on the raw input text exactly as provided (including punctuation and spaces).",
@@ -256,6 +281,7 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
             "- Do NOT output duplicate entities with identical (start,end).",
             "- Avoid overlaps. Only allow overlapping spans if both are necessary and semantically distinct.",
             "- Do not annotate generic words unless they explicitly indicate relevant concepts from allowed type_ids.",
+            f"- {SPEAKER_LABEL_RULE}",
             '- If no entities exist, return: "entities": [].',
             "",
             "SCORING RULES",
@@ -466,6 +492,7 @@ def build_mention_prompt(schema: SchemaConfig, text: str) -> str:
         "- Do not include trailing unit words that are not part of the value (e.g. \"seventy two\", not \"seventy two years old\").",
         "- Split a value into separate spans when its parts are different kinds of data (e.g. a street address and its postal code).",
         "- Spans must not overlap.",
+        f"- {SPEAKER_LABEL_RULE}",
         *[f"- {rule}" for rule in (schema.mention_rules or DEFAULT_MENTION_RULES)],
         "",
         "OUTPUT (API CONTRACT)",

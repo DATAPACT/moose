@@ -359,3 +359,20 @@ async def test_two_step_schema_falls_back_to_the_llm_and_named_linkers_fail_clea
 
     with pytest.raises(LinkerUnavailable, match="could not be loaded"):
         await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}), linker="system1")
+
+
+@pytest.mark.asyncio
+async def test_llm_linker_still_works_when_laya_cannot_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    _failing_laya(monkeypatch)
+    llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.9}]})
+    [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
+    assert (entity["type_id"], entity["confidence"], entity["calibrated"]) == ("dpv-pd:Name", 0.9, False)
+
+
+def test_dpv_annotates_in_two_steps_with_the_llm_deciding() -> None:
+    from moose.ner import two_step_active
+
+    dpv = get_schema_config("dpv")
+    # Laya chooses badly among DPV's 8,000+ concepts zero-shot (DPVCallBench dev: 0.55 against
+    # 0.77 for the LLM), but two steps beat one step even with the LLM deciding.
+    assert (dpv.candidate_mode, dpv.linker) == ("two_step", "llm") and two_step_active(dpv)

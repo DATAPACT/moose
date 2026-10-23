@@ -270,9 +270,15 @@ async def decide(
     hinted: dict[int, dict[str, float]] = {}
     if system1 and labels:
         consulted = sorted(labels)
-        scorer = await get_scorer(calibration.model)
-        scores = await scorer.score(context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt)
-        hinted = dict(zip(consulted, scores))
+        try:
+            scorer = await get_scorer(calibration.model)
+        except LinkerUnavailable:
+            if linker != "llm":
+                raise
+            scorer = None  # the LLM decides anyway; Laya would only have added its probability
+        if scorer is not None:
+            scores = await scorer.score(context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt)
+            hinted = dict(zip(consulted, scores))
 
     for i, (choice, stated) in choices.items():
         if linker == "llm":

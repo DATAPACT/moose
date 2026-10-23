@@ -128,3 +128,23 @@ def test_text_prompt_multi_input_uses_array_contract() -> None:
     )
     assert "Input texts JSON:" in prompt
     assert "Top-level output MUST be a JSON array with length exactly equal to the number of input texts." in prompt
+
+
+def test_prompts_say_speaker_labels_are_not_mentions() -> None:
+    from moose.prompts import build_mention_prompt
+
+    one_step = build_text_ner_prompt(get_schema_config("coarse"), [{"task_id": "t", "text": "Agent: Hi."}], ["PERSON"])
+    two_step = build_mention_prompt(get_schema_config("dpv_privacy"), "Agent: Hi.")
+    assert 'speaker labels that only mark who is talking (e.g. "Agent:"' in one_step
+    assert 'speaker labels that only mark who is talking (e.g. "Agent:"' in two_step
+
+
+def test_small_one_step_prompts_define_their_types_and_large_ones_do_not() -> None:
+    from moose.schema import COARSE_TYPES
+
+    coarse = get_schema_config("coarse")
+    small = build_text_ner_prompt(coarse, [{"task_id": "t", "text": "Maria"}], list(COARSE_TYPES))
+    assert "TYPE DEFINITIONS" in small and "- PERSON (person): A named person" in small
+    dpv = get_schema_config("dpv")
+    large = build_text_ner_prompt(dpv, [{"task_id": "t", "text": "x"}], dpv.load_type_ids())
+    assert "TYPE DEFINITIONS" not in large
