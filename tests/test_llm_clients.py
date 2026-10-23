@@ -119,3 +119,24 @@ async def test_usage_records_actual_model_tokens_and_cost() -> None:
         "cost_usd": 0.0004,
         "fallbacks": 2,
     }
+
+
+def test_openrouter_requests_ask_for_the_fastest_provider_by_default() -> None:
+    from moose.llm.openrouter import OpenRouterClient, openrouter_routing
+
+    client = OpenRouterClient(api_key="k", model="m", timeout=5)
+    assert client._extra_body == {"provider": {"sort": "throughput"}}
+    assert OpenRouterClient(api_key="k", model="m", timeout=5, provider_sort=None)._extra_body == {}
+    assert openrouter_routing("") is None
+
+
+def test_api_openrouter_clients_ask_for_the_configured_provider_sort() -> None:
+    from types import SimpleNamespace
+
+    from moose_api.queue import WorkerPool
+
+    queue = SimpleNamespace(set_shutdown_event=lambda event: None)
+    pool = WorkerPool(queue, None, None, SimpleNamespace(MOOSE_TIMEOUT_SECS=5, MOOSE_QUEUE_MAXSIZE=10, MOOSE_OPENROUTER_PROVIDER_SORT="throughput"))
+    openrouter = pool._client(SimpleNamespace(base_url="https://openrouter.ai/api/v1", api_key="k", provider="openrouter"), "m")
+    openai = pool._client(SimpleNamespace(base_url="https://api.openai.com/v1", api_key="k", provider="openai"), "m")
+    assert openrouter._extra_body == {"provider": {"sort": "throughput"}} and openai._extra_body == {}

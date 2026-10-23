@@ -37,5 +37,6 @@ def create_client(settings: Settings, model: str | None = None, api_key: str | N
             base_url=settings.MOOSE_OPENROUTER_BASE_URL,
             model=model,
             timeout=settings.MOOSE_TIMEOUT_SECS,
+            provider_sort=settings.MOOSE_OPENROUTER_PROVIDER_SORT or None,
         )
     raise ValueError(f"Unsupported LLM provider: {settings.MOOSE_LLM_PROVIDER}")

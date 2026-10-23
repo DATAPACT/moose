@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     MOOSE_MAX_TASKS_PER_PROMPT: int = 10
     MOOSE_MAX_CHARS_PER_PROMPT: int = 12000
     MOOSE_TIMEOUT_SECS: float = 3600.0
+    # OpenRouter: how to choose among the providers serving a model ("throughput": the
+    # fastest available; "price"; "latency"; empty: OpenRouter's default).
+    MOOSE_OPENROUTER_PROVIDER_SORT: str = "throughput"
 
 
 @lru_cache
