@@ -1,0 +1,6 @@
+{
+  "model": "convaiinnovations/laya",
+  "consult_below": 0.9,
+  "validated_for": [],
+  "fitted_on": "DPVCallBench v0.1 dev (267 mentions with exact gold spans), dpv_pd two-step candidates, LLM openai/gpt-oss-120b; research/dpv_eval/fit_system1.py. At this threshold: accuracy 0.805, ECE 0.134; LLM alone 0.79."
+}

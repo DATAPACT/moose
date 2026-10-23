@@ -1,0 +1,6 @@
+{
+  "model": "convaiinnovations/laya",
+  "consult_below": 0.8,
+  "validated_for": [],
+  "fitted_on": "DPVCallBench v0.1 dev (302 mentions with exact gold spans), dpv two-step candidates, LLM openai/gpt-oss-120b; research/dpv_eval/fit_system1.py. At this threshold: accuracy 0.636, ECE 0.268; LLM alone 0.772. Not recommended: dpv's default linker is llm; this threshold applies only when a request asks for system1+llm, which was less accurate than the LLM alone on dev."
+}

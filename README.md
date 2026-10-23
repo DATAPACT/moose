@@ -318,7 +318,7 @@ A request can choose who decides with `"linker"`:
 |---|---|---|
 | `system1+llm` (default with Laya) | Laya, consulting the LLM when unsure | 1, plus 1 when any item is unsure |
 | `system1` | Laya alone | 1 |
-| `llm` (default without Laya) | The LLM; Laya gives the probability of its choice | 2 |
+| `llm` (default without Laya, and for `dpv`) | The LLM, with its own stated confidence (not calibrated); Laya is not used | 2 |
 
 Each entity or column reports:
 - `confidence`;
@@ -336,6 +336,18 @@ On DPVCallBench (train and dev, 1,093 mentions with the right span), the default
 - has a mean confidence of 0.801, so its calibration error is 0.03 (0.20 for the LLM's
   stated confidence);
 - asks the LLM about 16% of mentions.
+
+Each schema has its own calibration file, fitted on DPVCallBench dev:
+
+| Schema | Default linker | Consult below | Probabilities validated |
+|---|---|---|---|
+| `dpv_privacy` | System 1 + LLM | 0.6 | text |
+| `dpv_pd` | System 1 + LLM | 0.9 | no |
+| `dpv` | LLM, always two-step | – | no |
+
+Zero-shot Laya chooses badly among `dpv`'s 8,000+ concepts: 55% right, against 77% for
+the LLM. Two-step `dpv` with the LLM deciding still beats one-step `dpv` (span + concept
+F1 0.50 against 0.37), at about 1/11 of the cost.
 
 Against `dpv`, two-step costs about 1/20 as much on dev (about 1,100 prompt tokens per text
 instead of 98,000) and scores higher: span + concept F1 0.63 against 0.37. Table

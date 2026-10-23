@@ -8,10 +8,9 @@ adds what it knows. Three linkers:
                calibration's `consult_below`) go to the LLM, whose suggestion is added to
                Laya's input; Laya then decides again. The final probability is Laya's.
   system1      Laya alone; no LLM call for this step.
-  llm          the LLM decides. With Laya installed, the probability of the LLM's choice
-               is Laya's, given the LLM's suggestion; otherwise it is the number the LLM
-               states. Neither is calibrated (`"calibrated": false`): on DPVCallBench,
-               Laya's probability of the LLM's choice was far too low (ECE 0.23-0.36).
+  llm          the LLM decides and states its confidence, which is not calibrated
+               (`"calibrated": false`). Laya is not used: on DPVCallBench its probability
+               for the LLM's choice was far too low (ECE 0.23-0.36) to be worth computing.
 
 On DPVCallBench (two-step `dpv_privacy`), system1+llm with consult_below 0.6 matched or
 beat both Laya and the LLM alone and halved the calibration error, asking the LLM about
@@ -267,22 +266,20 @@ async def decide(
         for i, (choice, _) in choices.items()
         if choice != "none"
     }
+    if linker == "llm":
+        for i, (choice, stated) in choices.items():
+            decisions[i] = Decision(choice, stated if choice != "none" else 0.0, "llm", False)
+        return decisions  # type: ignore[return-value]
+
     hinted: dict[int, dict[str, float]] = {}
-    if system1 and labels:
+    if labels:  # system1+llm: Laya decides again, given the LLM's suggestion
         consulted = sorted(labels)
         scorer = await get_scorer(calibration.model)
         scores = await scorer.score(context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt)
         hinted = dict(zip(consulted, scores))
 
     for i, (choice, stated) in choices.items():
-        if linker == "llm":
-            if choice == "none":
-                decisions[i] = Decision("none", 0.0, "llm", False)
-            elif i in hinted:
-                decisions[i] = Decision(choice, hinted[i].get(choice, 0.0), "llm", False, hinted[i], labels[i])
-            else:
-                decisions[i] = Decision(choice, stated, "llm", False)
-        elif i in hinted:  # system1+llm: Laya decides again, with the LLM's suggestion
+        if i in hinted:  # system1+llm: Laya decides again, with the LLM's suggestion
             best = max(hinted[i], key=hinted[i].get)
             decisions[i] = Decision(best, hinted[i][best], "system1+llm", validated, hinted[i], labels[i])
         elif choice == "none":

@@ -189,13 +189,15 @@ async def test_system1_consults_the_llm_only_when_unsure_and_decides_again(monke
 
 
 @pytest.mark.asyncio
-async def test_llm_linker_reports_laya_probability_of_the_llm_choice(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    fake = _FakeLaya(plain={}, hinted={"Luca Bianchi": {"dpv-pd:Name": 0.85}})
+async def test_llm_linker_does_not_run_laya(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    fake = _FakeLaya(plain={}, hinted={})
     _use_laya(monkeypatch, tmp_path, fake)
     llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.99}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
-    # Laya's probability of the LLM's choice is reported, but not as calibrated (it was too low on DPVCallBench).
-    assert (entity["decided_by"], entity["calibrated"], entity["confidence"]) == ("llm", False, 0.85)
+    # The LLM's stated confidence, not calibrated; Laya's probability for the LLM's choice was
+    # too poorly calibrated on DPVCallBench to be worth computing.
+    assert (entity["decided_by"], entity["calibrated"], entity["confidence"]) == ("llm", False, 0.99)
+    assert fake.calls == [] and "ranking" not in entity
 
 
 @pytest.mark.asyncio
@@ -359,3 +361,20 @@ async def test_two_step_schema_falls_back_to_the_llm_and_named_linkers_fail_clea
 
     with pytest.raises(LinkerUnavailable, match="could not be loaded"):
         await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}), linker="system1")
+
+
+@pytest.mark.asyncio
+async def test_llm_linker_still_works_when_laya_cannot_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    _failing_laya(monkeypatch)
+    llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.9}]})
+    [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
+    assert (entity["type_id"], entity["confidence"], entity["calibrated"]) == ("dpv-pd:Name", 0.9, False)
+
+
+def test_dpv_annotates_in_two_steps_with_the_llm_deciding() -> None:
+    from moose.ner import two_step_active
+
+    dpv = get_schema_config("dpv")
+    # Laya chooses badly among DPV's 8,000+ concepts zero-shot (DPVCallBench dev: 0.55 against
+    # 0.77 for the LLM), but two steps beat one step even with the LLM deciding.
+    assert (dpv.candidate_mode, dpv.linker) == ("two_step", "llm") and two_step_active(dpv)

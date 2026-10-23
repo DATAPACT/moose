@@ -7,7 +7,7 @@ import streamlit as st
 LINKER_HELP = {
     "system1+llm": "System 1 + LLM: Laya decides and consults the LLM when unsure",
     "system1": "System 1 only: Laya decides, no extra LLM call",
-    "llm": "LLM: the LLM decides; its probability is not calibrated",
+    "llm": "LLM: the LLM decides; its stated confidence is not calibrated",
 }
 
 

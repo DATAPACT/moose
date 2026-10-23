@@ -4,5 +4,5 @@
   "validated_for": [
     "text"
   ],
-  "fitted_on": "DPVCallBench v0.1 train+dev (1093 mentions with exact gold spans), dpv_privacy two-step candidates, LLM openai/gpt-oss-120b; research/dpv_eval/fit_system1.py"
+  "fitted_on": "DPVCallBench v0.1. Threshold chosen on train+dev (1093 mentions with exact gold spans); refit on dev with the current code (275 mentions): at 0.6 accuracy 0.811, ECE 0.07, LLM consulted for 21% of mentions; LLM alone 0.760. dpv_privacy two-step candidates, zero-shot Laya, LLM openai/gpt-oss-120b; research/dpv_eval/fit_system1.py."
 }
