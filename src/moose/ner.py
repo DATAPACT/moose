@@ -8,7 +8,17 @@ from urllib.parse import quote, unquote
 
 from moose.candidates import candidate_index
 from moose.config import Settings, get_settings
-from moose.linkers import TABLE_PROMPT, Calibration, Decision, decide, ranked, system1_ready
+from moose.linkers import (
+    SYSTEM1_LINKERS,
+    TABLE_PROMPT,
+    Calibration,
+    Decision,
+    LinkerUnavailable,
+    decide,
+    get_scorer,
+    ranked,
+    system1_ready,
+)
 from moose.prob import choose_argmax
 from moose.prompts import (
     build_candidate_choice_prompt,
@@ -248,10 +258,13 @@ async def run_text_ner(
         raise ValueError(f"Schema '{schema}' does not support text annotation.")
 
     if two_step_active(schema_config, linker):
-        results = await asyncio.gather(
-            *(_two_step_text_task(task, schema_config, llm_client, settings, linker) for task in tasks)
-        )
-        return {"results": list(results)}
+        resolved = await _linker_or_fallback(schema_config, linker)
+        if resolved is not None:
+            results = await asyncio.gather(
+                *(_two_step_text_task(task, schema_config, llm_client, settings, resolved) for task in tasks)
+            )
+            return {"results": list(results)}
+        # else: an "auto" schema whose System 1 model cannot be loaded uses the one-step path
     if linker is not None:
         raise ValueError(f"Schema '{schema}' annotates in one step; a linker applies only to two-step schemas.")
 
@@ -365,6 +378,20 @@ def two_step_active(schema: SchemaConfig, linker: str | None = None) -> bool:
     if schema.candidate_mode == "auto":
         return linker is not None or system1_ready(Calibration.load(schema.linker_calibration))
     return False
+
+
+async def _linker_or_fallback(schema: SchemaConfig, requested: str | None) -> str | None:
+    """The linker for a two-step request. When the System 1 model was chosen by default
+    ("auto") but cannot be loaded, fall back: to the one-step path (None) for "auto" schemas,
+    to the LLM linker for two-step ones. A linker the request named is never replaced."""
+    calibration = Calibration.load(schema.linker_calibration)
+    linker = resolve_linker(requested, calibration, schema.linker)
+    if linker in SYSTEM1_LINKERS and requested is None and schema.linker == "auto":
+        try:
+            await get_scorer(calibration.model)
+        except LinkerUnavailable:
+            return None if schema.candidate_mode == "auto" else "llm"
+    return linker
 
 
 def resolve_linker(requested: str | None, calibration: Calibration | None, default: str = "auto") -> str:
@@ -682,10 +709,13 @@ async def run_table_annotate(
     if not schema_config.supports_table:
         raise ValueError(f"Schema '{schema}' does not support tabular annotation.")
     if two_step_active(schema_config, linker):
-        results = await asyncio.gather(
-            *(_two_step_table_task(task, schema_config, llm_client, settings, linker) for task in tasks)
-        )
-        return {"results": list(results)}
+        resolved = await _linker_or_fallback(schema_config, linker)
+        if resolved is not None:
+            results = await asyncio.gather(
+                *(_two_step_table_task(task, schema_config, llm_client, settings, resolved) for task in tasks)
+            )
+            return {"results": list(results)}
+        # else: an "auto" schema whose System 1 model cannot be loaded uses the one-step path
     if linker is not None:
         raise ValueError(f"Schema '{schema}' annotates in one step; a linker applies only to two-step schemas.")
 

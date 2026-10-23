@@ -11,7 +11,7 @@ LINKER_HELP = {
 }
 
 
-def linker_picker(schema_info: dict[str, Any], *, key: str, item: str = "item") -> str | None:
+def linker_picker(schema_info: dict[str, Any], *, key: str, item: str = "item", task: str = "text") -> str | None:
     """The linker for a two-step schema, chosen among those the API server can run; None otherwise."""
     if schema_info.get("candidate_mode") != "two_step":
         st.caption("One-step schema: the LLM sees all of the schema's types and decides, without the System 1 model.")
@@ -31,10 +31,10 @@ def linker_picker(schema_info: dict[str, Any], *, key: str, item: str = "item") 
     )
     if available == ["llm"]:
         st.caption("The System 1 model (Laya) is not installed on this API server, so only the LLM linker is available.")
-    elif not schema_info.get("system1_validated", True):
+    elif task not in schema_info.get("system1_validated_for", [task]):
         st.caption(
-            "Laya's probabilities for this schema have not been checked against labelled data yet, "
-            "so results show calibrated = false. dpv_privacy text is validated."
+            f"Laya's probabilities for this schema's {task} annotations have not been checked against "
+            "labelled data yet, so results show calibrated = false. dpv_privacy text is validated."
         )
     return choice
 

@@ -446,11 +446,8 @@ def build_table_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: list[s
     )
 
 
-# Unless a schema says otherwise, both values and mentions of a kind of thing count, as in
-# privacy policies ("we collect email addresses").
-DEFAULT_MENTION_RULES = (
-    'Annotate both specific values (e.g. "luca@example.com") and mentions of a kind of thing (e.g. "email addresses").',
-)
+# Extra span rules come from the schema's registry entry ("mention_rules"); none by default.
+DEFAULT_MENTION_RULES: tuple[str, ...] = ()
 
 
 def build_mention_prompt(schema: SchemaConfig, text: str) -> str:

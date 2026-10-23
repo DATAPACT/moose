@@ -709,6 +709,8 @@ async def submit_dpv_ner(
         "schema": "dpv",
         "text": request.text,
     }
+    if request.linker:
+        payload["linker"] = request.linker
     job_id = await _enqueue_job("ner", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
@@ -995,7 +997,8 @@ async def list_schemas(include_type_count: bool = False) -> dict[str, Any]:
             if item["candidate_mode"] == "two_step":
                 item["linker"] = resolve_linker(None, calibration, cfg.linker)
                 item["linkers"] = list(LINKERS) if system1_ready(calibration) else ["llm"]
-                item["system1_validated"] = bool(calibration and calibration.validated_for)
+                # Tasks ("text", "table") on which its probabilities were checked against labelled data.
+                item["system1_validated_for"] = list(calibration.validated_for) if calibration else []
         if include_type_count:
             try:
                 item["type_count"] = len(cfg.load_type_ids())

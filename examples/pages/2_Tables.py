@@ -101,7 +101,7 @@ if operation == "Column typing":
     recommended = next((n for n in ("dpv_privacy", "sti", "dpv_pd", "dpv") if n in table_schema_names), table_schema_names[0])
     schema = st.selectbox("Schema", table_schema_names, index=table_schema_names.index(recommended))
     schema_info = next((s for s in schemas if s.get("name") == schema), {})
-    linker = linker_picker(schema_info, key="tables_linker", item="column")
+    linker = linker_picker(schema_info, key="tables_linker", item="column", task="table")
 
     if st.button("Run column typing", type="primary"):
         if err:

@@ -19,9 +19,9 @@ import moose_ui.submit as submit  # noqa: E402
 SCHEMAS = [
     {"name": "coarse", "supports_text": True, "candidate_mode": "all"},
     {"name": "dpv_pd", "supports_text": True, "candidate_mode": "two_step", "linker": "system1+llm",
-     "linkers": ["system1+llm", "system1", "llm"], "system1_validated": False},
+     "linkers": ["system1+llm", "system1", "llm"], "system1_validated_for": []},
     {"name": "dpv_privacy", "supports_text": True, "supports_table": True, "candidate_mode": "two_step",
-     "linker": "system1+llm", "linkers": ["system1+llm", "system1", "llm"], "system1_validated": True},
+     "linker": "system1+llm", "linkers": ["system1+llm", "system1", "llm"], "system1_validated_for": ["text"]},
 ]
 RESULT = {
     "job_id": "j1",
@@ -112,3 +112,10 @@ def test_unvalidated_system1_schema_says_its_probabilities_are_not_calibrated(ap
     page.selectbox[0].set_value("dpv_pd").run()
     assert page.radio[0].value == "system1+llm"
     assert any("not been checked against labelled data" in c.value for c in page.caption)
+
+
+def test_tables_page_says_when_table_probabilities_are_not_validated(app) -> None:
+    page = app("2_Tables.py")
+    page.run()
+    # dpv_privacy is validated for text only.
+    assert any("column annotations" not in c.value and "table annotations have not been checked" in c.value for c in page.caption)

@@ -477,11 +477,11 @@ def test_schema_list_says_which_linkers_a_two_step_schema_can_use(client: TestCl
     for module in (main_module, ner_module):
         monkeypatch.setattr(module, "system1_ready", lambda calibration: calibration is not None)
     privacy, coarse, sti = listed()["dpv_privacy"], listed()["coarse"], listed()["sti"]
-    assert (privacy["candidate_mode"], privacy["linker"], privacy["linkers"], privacy["system1_validated"]) == (
-        "two_step", "system1+llm", ["system1+llm", "system1", "llm"], True,
+    assert (privacy["candidate_mode"], privacy["linker"], privacy["linkers"], privacy["system1_validated_for"]) == (
+        "two_step", "system1+llm", ["system1+llm", "system1", "llm"], ["text"],
     )
     # "auto" schemas are two-step with the System 1 model, but not validated against labelled data.
-    assert (coarse["candidate_mode"], coarse["linker"], coarse["system1_validated"]) == ("two_step", "system1+llm", False)
+    assert (coarse["candidate_mode"], coarse["linker"], coarse["system1_validated_for"]) == ("two_step", "system1+llm", [])
     assert sti["candidate_mode"] == "all" and "linkers" not in sti
 
     for module in (main_module, ner_module):

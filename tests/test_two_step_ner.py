@@ -142,8 +142,12 @@ def _use_laya(monkeypatch: pytest.MonkeyPatch, tmp_path, fake: _FakeLaya, consul
     path.write_text(json.dumps({"consult_below": consult_below}))
     schema = dataclasses.replace(get_schema_config("dpv_privacy"), linker_calibration=path)
     monkeypatch.setattr(ner_module, "get_schema_config", lambda name: schema)
+    async def get_fake(model):
+        return fake
+
     monkeypatch.setattr(linkers, "laya_available", lambda: True)
-    monkeypatch.setattr(linkers, "laya_scorer", lambda model: fake)
+    monkeypatch.setattr(linkers, "get_scorer", get_fake)
+    monkeypatch.setattr(ner_module, "get_scorer", get_fake)
 
 
 TWO = {"mentions": MENTIONS["mentions"][:2]}
@@ -284,8 +288,10 @@ def test_mentions_of_a_kind_of_data_count_except_where_a_schema_says_otherwise()
 
     general = build_mention_prompt(get_schema_config("dpv_pd"), "We collect email addresses.")
     benchmark = build_mention_prompt(get_schema_config("dpv_privacy"), "We collect email addresses.")
-    assert 'mentions of a kind of thing (e.g. "email addresses")' in general
-    assert "only name a category without giving a value" in benchmark and "mentions of a kind of thing" not in benchmark
+    named = build_mention_prompt(get_schema_config("coarse"), "Several companies opened offices.")
+    assert 'mentions of a kind of data (e.g. "email addresses")' in general
+    assert "only name a category without giving a value" in benchmark and "mentions of a kind of data" not in benchmark
+    assert "named entities only" in named and "mentions of a kind" not in named
 
 
 def test_two_letter_words_like_ip_find_their_type() -> None:
@@ -300,3 +306,56 @@ async def test_unsure_system1_and_a_rejecting_llm_drop_the_item(monkeypatch: pyt
     llm = _ScriptedLLM(TWO, {"choices": [{"mention": 0, "type_id": "none"}]})
     entities = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm))["results"][0]["entities"]
     assert [e["text"] for e in entities] == ["Luca Bianchi"]
+
+
+
+def _failing_laya(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Laya installed, but its model cannot be loaded; returns the models it tried."""
+    import moose.linkers as linkers
+
+    tried: list[str] = []
+
+    class _Broken:
+        def __init__(self, model):
+            tried.append(model)
+            raise OSError("no route to huggingface.co")
+
+    monkeypatch.setattr(linkers, "laya_available", lambda: True)
+    monkeypatch.setattr(linkers, "LayaScorer", _Broken)
+    monkeypatch.setattr(linkers, "_SCORERS", {})
+    monkeypatch.setattr(linkers, "_FAILURES", {})
+    return tried
+
+
+@pytest.mark.asyncio
+async def test_auto_schema_falls_back_to_one_step_when_laya_cannot_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    import moose.linkers as linkers
+
+    tried = _failing_laya(monkeypatch)
+    from moose.schema import COARSE_TYPES
+
+    # coarse scores densely: the one-step answer scores every type.
+    scores = {t: (1.0 if t == "PERSON" else 0.0) for t in COARSE_TYPES}
+    one_step = {"entities": [{"start": 0, "end": 5, "text": "Maria", "scores": scores}]}
+    llm = _ScriptedLLM(one_step)
+    result = await run_text_ner([{"task_id": "t", "text": "Maria lives in Milan."}], "coarse", llm)
+
+    assert [e["type_id"] for e in result["results"][0]["entities"]] == ["PERSON"]
+    assert len(llm.prompts) == 1 and "TASK" in llm.prompts[0]
+    # The failure is remembered: no new attempt for a while, and auto schemas stay one-step.
+    assert not linkers.system1_ready(linkers.Calibration.load(get_schema_config("coarse").linker_calibration))
+    await run_text_ner([{"task_id": "t", "text": "Maria lives in Milan."}], "coarse", _ScriptedLLM(one_step))
+    assert len(tried) == 1
+
+
+@pytest.mark.asyncio
+async def test_two_step_schema_falls_back_to_the_llm_and_named_linkers_fail_clearly(monkeypatch: pytest.MonkeyPatch) -> None:
+    from moose.linkers import LinkerUnavailable
+
+    _failing_laya(monkeypatch)
+    llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name"}]})
+    [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm))["results"][0]["entities"]
+    assert (entity["type_id"], entity["decided_by"], entity["calibrated"]) == ("dpv-pd:Name", "llm", False)
+
+    with pytest.raises(LinkerUnavailable, match="could not be loaded"):
+        await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}), linker="system1")

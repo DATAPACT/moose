@@ -27,8 +27,8 @@ import asyncio
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -83,7 +83,8 @@ class Calibration:
 
 
 def system1_ready(calibration: Calibration | None) -> bool:
-    return calibration is not None and laya_available()
+    """Laya is installed and its model has not just failed to load."""
+    return calibration is not None and laya_available() and _recent_failure(calibration.model) is None
 
 
 def _short(definition: str | None, limit: int = LAYA_DEFINITION_CHARS) -> str:
@@ -129,7 +130,7 @@ def laya_inputs(
 
 
 class LayaScorer:
-    """One loaded Laya model, shared by all jobs. Predictions run one at a time in a thread."""
+    """One loaded Laya model, shared by all jobs. Predictions run one text at a time in a thread."""
 
     def __init__(self, model: str) -> None:
         if not laya_available():
@@ -139,12 +140,17 @@ class LayaScorer:
         self._agent = laya.load(model, device=os.getenv("MOOSE_LAYA_DEVICE") or None)
         self._lock = threading.Lock()
 
-    def _score_sync(self, context: str, item: dict[str, Any], suggestion: str | None, prompt: Prompt) -> dict[str, float]:
-        state, questions = laya_inputs(context, item, suggestion, prompt)
+    def _score_sync(
+        self, context: str, items: list[dict[str, Any]], suggestions: list[str | None], prompt: Prompt
+    ) -> list[dict[str, float]]:
+        out = []
         with self._lock:
-            answer = self._agent.predict(state, questions)["answers"]["category"]
-        ids = [c["id"] for c in item["candidates"]]
-        return {ids[int(key.split("_")[1])]: float(p) for key, p in answer["probabilities"].items()}
+            for item, suggestion in zip(items, suggestions):
+                state, questions = laya_inputs(context, item, suggestion, prompt)
+                answer = self._agent.predict(state, questions)["answers"]["category"]
+                ids = [c["id"] for c in item["candidates"]]
+                out.append({ids[int(key.split("_")[1])]: float(p) for key, p in answer["probabilities"].items()})
+        return out
 
     async def score(
         self,
@@ -153,14 +159,55 @@ class LayaScorer:
         suggestions: list[str | None] | None = None,
         prompt: Prompt = TEXT_PROMPT,
     ) -> list[dict[str, float]]:
-        """Probability per candidate, for each item; `suggestions` are the LLM's labels."""
-        suggestions = suggestions or [None] * len(items)
-        return [await asyncio.to_thread(self._score_sync, context, item, s, prompt) for item, s in zip(items, suggestions)]
+        """Probability per candidate, for each item; `suggestions` are the LLM's labels.
+        All items of one call are scored in one thread, so a text's items stay together."""
+        return await asyncio.to_thread(self._score_sync, context, items, suggestions or [None] * len(items), prompt)
 
 
-@lru_cache(maxsize=2)
+# Loaded models, and recent load failures (not retried for a while, so a broken download
+# or a missing network does not make every job wait for another attempt).
+_SCORERS: dict[str, LayaScorer] = {}
+_FAILURES: dict[str, tuple[float, str]] = {}
+_LOAD_LOCK = threading.Lock()
+RETRY_LOAD_AFTER_SECONDS = 600
+
+
+def _recent_failure(model: str) -> str | None:
+    failure = _FAILURES.get(model)
+    if failure and time.monotonic() - failure[0] < RETRY_LOAD_AFTER_SECONDS:
+        return failure[1]
+    return None
+
+
 def laya_scorer(model: str = DEFAULT_LAYA_MODEL) -> LayaScorer:
-    return LayaScorer(model)
+    """The loaded scorer for `model`, loading it on first use (blocking: the first load can
+    download about 800 MB). Async code uses get_scorer, which loads in a thread."""
+    if model in _SCORERS:
+        return _SCORERS[model]
+    with _LOAD_LOCK:  # one load at a time; a second caller finds the first one's result
+        if model in _SCORERS:
+            return _SCORERS[model]
+        failure = _recent_failure(model)
+        if failure:
+            raise LinkerUnavailable(failure)
+        try:
+            scorer = LayaScorer(model)
+        except LinkerUnavailable:
+            raise
+        except Exception as exc:  # noqa: BLE001 - download, disk or memory problems
+            message = f"The System 1 model {model!r} could not be loaded: {exc}"
+            _FAILURES[model] = (time.monotonic(), message)
+            raise LinkerUnavailable(message) from exc
+        _FAILURES.pop(model, None)
+        _SCORERS[model] = scorer
+        return scorer
+
+
+async def get_scorer(model: str) -> LayaScorer:
+    """laya_scorer without blocking the event loop while the model downloads or loads."""
+    if model in _SCORERS:
+        return _SCORERS[model]
+    return await asyncio.to_thread(laya_scorer, model)
 
 
 def ranked(probabilities: dict[str, float], top: int = 3) -> list[dict[str, Any]]:
@@ -196,12 +243,13 @@ async def decide(
     system1 = system1_ready(calibration)
     validated = system1 and task in calibration.validated_for
     if linker in SYSTEM1_LINKERS and not system1:
-        raise LinkerUnavailable("This linker needs Laya and the schema's calibration; use the llm linker.")
+        failure = _recent_failure(calibration.model) if calibration else None
+        raise LinkerUnavailable(failure or "This linker needs Laya and the schema's calibration; use the llm linker.")
 
     decisions: list[Decision | None] = [None] * len(items)
     to_llm = list(range(len(items)))
     if system1 and linker != "llm":
-        scorer = laya_scorer(calibration.model)
+        scorer = await get_scorer(calibration.model)
         plain = await scorer.score(context, items, prompt=prompt)
         to_llm = []
         for i, probabilities in enumerate(plain):
@@ -222,9 +270,8 @@ async def decide(
     hinted: dict[int, dict[str, float]] = {}
     if system1 and labels:
         consulted = sorted(labels)
-        scores = await laya_scorer(calibration.model).score(
-            context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt
-        )
+        scorer = await get_scorer(calibration.model)
+        scores = await scorer.score(context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt)
         hinted = dict(zip(consulted, scores))
 
     for i, (choice, stated) in choices.items():

@@ -6,7 +6,10 @@
     "score_mode": "dense",
     "type_source": "coarse_types.json",
     "candidate_mode": "auto",
-    "mention_guidance": "named entities: people, organisations, locations, events, works, products and other named concepts."
+    "mention_guidance": "named entities: people, organisations, locations, events, works, products and other named concepts.",
+    "mention_rules": [
+      "Annotate named entities only (proper names such as \"Acme\" or \"Milan\"), not generic nouns such as \"companies\" or \"cities\"."
+    ]
   },
   {
     "coarse_mapping": {
@@ -49,7 +52,10 @@
     },
     "type_source": "fine_types.json",
     "candidate_mode": "auto",
-    "mention_guidance": "named entities: people and fictional characters, companies and other organisations, places, events, creative works, software, products, medications, foods, languages, laws, theories, species and body parts."
+    "mention_guidance": "named entities: people and fictional characters, companies and other organisations, places, events, creative works, software, products, medications, foods, languages, laws, theories, species and body parts.",
+    "mention_rules": [
+      "Annotate named entities only (proper names such as \"Acme\" or \"Milan\"), not generic nouns such as \"companies\" or \"cities\"."
+    ]
   },
   {
     "cpa_intro": "You are a column relationship prediction engine. Your task is to predict the semantic relationship between a SUBJECT column and each TARGET column in a table. Choose ONLY from the provided relationship labels. If none apply, choose CPA:NONE. If a relationship exists but is not in the label set, choose CPA:OTHER.",
@@ -73,7 +79,10 @@
     "type_alias_prefixes": {},
     "type_source": "dpv/concepts.json",
     "candidate_mode": "auto",
-    "mention_guidance": "concepts of the Data Privacy Vocabulary: personal data categories, purposes of processing, legal bases, processing activities, people and organisations in privacy roles, technical and organisational measures, risks and rights."
+    "mention_guidance": "concepts of the Data Privacy Vocabulary: personal data categories, purposes of processing, legal bases, processing activities, people and organisations in privacy roles, technical and organisational measures, risks and rights.",
+    "mention_rules": [
+      "Annotate both specific values (e.g. \"luca@example.com\") and mentions of a kind of data or concept (e.g. \"email addresses\", \"fraud prevention\"), as in privacy policies."
+    ]
   },
   {
     "description": "DPV personal data + AI concept subset for fast privacy detection.",
@@ -86,7 +95,10 @@
     "type_alias_prefixes": {},
     "type_source": "dpv/subsets/dpv_pd_only/type_ids_pd_ai.json",
     "candidate_mode": "auto",
-    "mention_guidance": "personal data about a person (for example names, contact details, identifiers, financial, health, demographic and behavioural data), or AI systems, techniques and AI-related activities."
+    "mention_guidance": "personal data about a person (for example names, contact details, identifiers, financial, health, demographic and behavioural data), or AI systems, techniques and AI-related activities.",
+    "mention_rules": [
+      "Annotate both specific values (e.g. \"luca@example.com\") and mentions of a kind of data (e.g. \"email addresses\"), as in privacy policies."
+    ]
   },
   {
     "name": "dpv_privacy",
