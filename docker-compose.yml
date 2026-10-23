@@ -10,7 +10,11 @@ x-logging: &logging
 
 services:
   moose-api:
-    build: .
+    build:
+      context: .
+      args:
+        # "laya" installs the local Laya linker for two-step schemas.
+        MOOSE_EXTRAS: ${MOOSE_EXTRAS:-}
     ports:
       - "${MOOSE_BIND_ADDRESS:-127.0.0.1}:${MOOSE_API_PORT:-8000}:8000"
     env_file:
@@ -36,6 +40,8 @@ services:
     volumes:
       # User-ingested schemas survive rebuilds.
       - ./data/moose-user:/app/src/moose/data/user
+      # Downloaded models (Laya), so a rebuild does not fetch them again.
+      - moose-models:/root/.cache/huggingface
       - type: bind
         source: ./data/user_vocabularies.json
         target: /app/src/moose/data/user_vocabularies.json
@@ -116,6 +122,7 @@ services:
 
 volumes:
   moose-mongo:
+  moose-models:
 
 networks:
   # Shared with the reverse proxy or tunnel (cloudflare_default on the VM).

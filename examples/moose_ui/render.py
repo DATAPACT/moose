@@ -6,6 +6,8 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from .linker import decision_caption, decision_fields
+
 
 def _expander_json(title: str, data: Any, *, show: bool) -> None:
     if not show:
@@ -174,11 +176,13 @@ def render_text_ner_result(result: dict[str, Any], *, show_raw: bool) -> None:
                     "type_group": _entity_type_group(ent.get("type_id")),
                     "coarse_type_id": ent.get("coarse_type_id"),
                     "confidence": ent.get("confidence"),
+                    **decision_fields(ent),  # two-step schemas only
                 }
             )
 
     if rows:
-        df = pd.DataFrame(rows)
+        # Drop columns no entity has (e.g. the two-step ones for other schemas).
+        df = pd.DataFrame(rows).dropna(axis=1, how="all")
         if not df.empty and "type_group" in df.columns:
             st.dataframe(
                 df.style.apply(
@@ -198,6 +202,8 @@ def render_text_ner_result(result: dict[str, Any], *, show_raw: bool) -> None:
             st.caption(
                 "Color legend: red=direct identifier, orange=network identifier, blue=recipient, yellow=quasi identifier."
             )
+            if "decided_by" in df.columns:
+                decision_caption()
         else:
             st.dataframe(df, use_container_width=True)
     else:
@@ -264,14 +270,20 @@ def render_tabular_annotate_result(result: dict[str, Any], *, show_raw: bool) ->
                     "fine_type_id": col.get("fine_type_id"),
                     "confidence": col.get("confidence"),
                     "fine_confidence": col.get("fine_confidence"),
+                    **decision_fields(col),  # two-step schemas only
                 }
             )
         if rows:
-            st.dataframe(rows, use_container_width=True)
+            # Drop columns no row has (the STI or the two-step ones, depending on the schema).
+            st.dataframe(pd.DataFrame(rows).dropna(axis=1, how="all"), use_container_width=True)
             if any(row.get("fine_type_id") for row in rows):
                 st.caption("For STI NE columns, both coarse_type_id and fine_type_id are shown.")
+            if any(row.get("decided_by") for row in rows):
+                decision_caption()
         else:
             st.info("No columns returned.")
+        if item.get("unannotated_columns"):
+            st.caption(f"No personal-data type for: {', '.join(map(str, item['unannotated_columns']))}")
 
     if result.get("warnings"):
         _expander_json("Warnings", result.get("warnings"), show=True)

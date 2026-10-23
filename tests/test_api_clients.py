@@ -364,7 +364,7 @@ def test_users_job_input_and_result_are_encrypted_at_rest(client: TestClient, mo
 
     import moose_api.queue as queue_module
 
-    async def fake_run_text_ner(tasks, schema, llm_client, settings=None):
+    async def fake_run_text_ner(tasks, schema, llm_client, settings=None, linker=None):
         return {"results": [{"task_id": tasks[0]["task_id"], "entities": [{"text": tasks[0]["text"][:11]}]}]}
 
     monkeypatch.setattr(queue_module, "run_text_ner", fake_run_text_ner)
@@ -391,7 +391,7 @@ def test_users_job_errors_are_encrypted_and_readable_by_owner(client: TestClient
 
     import moose_api.queue as queue_module
 
-    async def failing_run_text_ner(tasks, schema, llm_client, settings=None):
+    async def failing_run_text_ner(tasks, schema, llm_client, settings=None, linker=None):
         raise RuntimeError(f"could not parse: {tasks[0]['text']}")
 
     monkeypatch.setattr(queue_module, "run_text_ner", failing_run_text_ner)
@@ -429,7 +429,7 @@ def test_users_job_result_with_non_json_values_is_sealed(client: TestClient, mon
 
     import moose_api.queue as queue_module
 
-    async def fake_run_text_ner(tasks, schema, llm_client, settings=None):
+    async def fake_run_text_ner(tasks, schema, llm_client, settings=None, linker=None):
         when = datetime(2026, 1, 2, tzinfo=timezone.utc)
         return {"results": [{"task_id": tasks[0]["task_id"], "entities": [{"text": "x", "at": when}]}]}
 
@@ -452,3 +452,57 @@ def test_users_job_with_undecryptable_input_fails_cleanly(client: TestClient) ->
 
     owner = client.get(f"/jobs/{job_id}", headers={"X-API-Key": user["token"]}).json()
     assert owner["status"] == "failed" and "cannot be decrypted" in owner["error"]
+
+
+def test_linker_is_checked_when_the_job_is_submitted(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import moose_api.main as main_module
+
+    one_step = client.post("/schemas/sti/tabular/annotate", json={"sampled_rows": [{"a": "1"}], "linker": "system1"}, headers={"X-API-Key": SHARED_KEY})
+    assert one_step.status_code == 400 and "two-step" in one_step.json()["detail"]
+
+    monkeypatch.setattr(main_module, "system1_ready", lambda calibration: False)
+    no_laya = client.post("/schemas/dpv_privacy/ner", json={"text": TEXT, "linker": "system1+llm"}, headers={"X-API-Key": SHARED_KEY})
+    assert no_laya.status_code == 400 and "not available" in no_laya.json()["detail"]
+    assert client.post("/schemas/dpv_privacy/ner", json={"text": TEXT, "linker": "nope"}, headers={"X-API-Key": SHARED_KEY}).status_code == 422
+
+
+def test_schema_list_says_which_linkers_a_two_step_schema_can_use(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import moose.ner as ner_module
+    import moose_api.main as main_module
+
+    def listed() -> dict:
+        schemas = client.get("/schemas", headers={"X-API-Key": SHARED_KEY}).json()["schemas"]
+        return {s["name"]: s for s in schemas}
+
+    for module in (main_module, ner_module):
+        monkeypatch.setattr(module, "system1_ready", lambda calibration: calibration is not None)
+    privacy, coarse, sti = listed()["dpv_privacy"], listed()["coarse"], listed()["sti"]
+    assert (privacy["candidate_mode"], privacy["linker"], privacy["linkers"], privacy["system1_validated"]) == (
+        "two_step", "system1+llm", ["system1+llm", "system1", "llm"], True,
+    )
+    # "auto" schemas are two-step with the System 1 model, but not validated against labelled data.
+    assert (coarse["candidate_mode"], coarse["linker"], coarse["system1_validated"]) == ("two_step", "system1+llm", False)
+    assert sti["candidate_mode"] == "all" and "linkers" not in sti
+
+    for module in (main_module, ner_module):
+        monkeypatch.setattr(module, "system1_ready", lambda calibration: False)
+    assert (listed()["dpv_privacy"]["linker"], listed()["dpv_privacy"]["linkers"]) == ("llm", ["llm"])
+    assert listed()["coarse"]["candidate_mode"] == "all" and "linkers" not in listed()["coarse"]
+
+
+def test_table_job_keeps_the_columns_without_a_type(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import moose_api.queue as queue_module
+
+    async def fake_run_table_annotate(tasks, schema, llm_client, settings=None, linker=None):
+        return {"results": [{"task_id": tasks[0]["task_id"], "table_id": tasks[0]["table_id"],
+                             "columns": [{"column": "E-mail", "type_id": "dpv-pd:EmailAddress"}], "unannotated_columns": ["Plan"]}]}
+
+    monkeypatch.setattr(queue_module, "run_table_annotate", fake_run_table_annotate)
+    rows = [{"E-mail": "a@example.com", "Plan": "Gold"}]
+    job_id = client.post("/schemas/dpv_privacy/tabular/annotate", json={"sampled_rows": rows, "linker": "llm"},
+                         headers={"X-API-Key": SHARED_KEY}).json()["job_id"]
+    asyncio.run(app.state.worker_pool._process_job(job_id))
+    result = client.get(f"/jobs/{job_id}", headers={"X-API-Key": SHARED_KEY}).json()["result"]
+    assert result["unannotated_columns"] == ["Plan"] and result["columns"][0]["column"] == "E-mail"

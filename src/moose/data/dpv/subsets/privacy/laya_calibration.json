@@ -1,0 +1,8 @@
+{
+  "model": "convaiinnovations/laya",
+  "consult_below": 0.6,
+  "validated_for": [
+    "text"
+  ],
+  "fitted_on": "DPVCallBench v0.1 train+dev (1093 mentions with exact gold spans), dpv_privacy two-step candidates, LLM openai/gpt-oss-120b; research/dpv_eval/fit_system1.py"
+}

@@ -4,7 +4,9 @@
     "label": "Coarse",
     "name": "coarse",
     "score_mode": "dense",
-    "type_source": "coarse_types.json"
+    "type_source": "coarse_types.json",
+    "candidate_mode": "auto",
+    "mention_guidance": "named entities: people, organisations, locations, events, works, products and other named concepts."
   },
   {
     "coarse_mapping": {
@@ -45,7 +47,9 @@
     "type_aliases": {
       "HUMAN": "PERSON"
     },
-    "type_source": "fine_types.json"
+    "type_source": "fine_types.json",
+    "candidate_mode": "auto",
+    "mention_guidance": "named entities: people and fictional characters, companies and other organisations, places, events, creative works, software, products, medications, foods, languages, laws, theories, species and body parts."
   },
   {
     "cpa_intro": "You are a column relationship prediction engine. Your task is to predict the semantic relationship between a SUBJECT column and each TARGET column in a table. Choose ONLY from the provided relationship labels. If none apply, choose CPA:NONE. If a relationship exists but is not in the label set, choose CPA:OTHER.",
@@ -67,7 +71,9 @@
     "table_intro": "You are a DPV classification engine for tabular data.",
     "text_intro": "You are a DPV annotation engine.",
     "type_alias_prefixes": {},
-    "type_source": "dpv/concepts.json"
+    "type_source": "dpv/concepts.json",
+    "candidate_mode": "auto",
+    "mention_guidance": "concepts of the Data Privacy Vocabulary: personal data categories, purposes of processing, legal bases, processing activities, people and organisations in privacy roles, technical and organisational measures, risks and rights."
   },
   {
     "description": "DPV personal data + AI concept subset for fast privacy detection.",
@@ -78,7 +84,28 @@
     "table_intro": "You are a DPV personal data and AI classification engine for tabular data.",
     "text_intro": "You are a DPV personal data and AI annotation engine.",
     "type_alias_prefixes": {},
-    "type_source": "dpv/subsets/dpv_pd_only/type_ids_pd_ai.json"
+    "type_source": "dpv/subsets/dpv_pd_only/type_ids_pd_ai.json",
+    "candidate_mode": "auto",
+    "mention_guidance": "personal data about a person (for example names, contact details, identifiers, financial, health, demographic and behavioural data), or AI systems, techniques and AI-related activities."
+  },
+  {
+    "name": "dpv_privacy",
+    "label": "DPV Privacy (two-step)",
+    "description": "DPV personal-data categories, legal roles and data-subject types, annotated in two steps: find mentions, then choose among retrieved candidates.",
+    "type_source": "dpv/subsets/privacy/types.json",
+    "score_mode": "sparse",
+    "candidate_mode": "two_step",
+    "candidate_k": 8,
+    "linker": "auto",
+    "linker_calibration": "dpv/subsets/privacy/laya_calibration.json",
+    "mention_guidance": "personal data about a person (for example names, contact details, identifiers, account, payment and financial data, health, age and other demographic data), or a person or organisation acting in a privacy role (data controller, data processor, recipient, third party).",
+    "mention_rules": [
+      "Do not annotate words that only name a category without giving a value (e.g. \"your email address\"); annotate the value itself."
+    ],
+    "text_intro": "You are a DPV annotation engine.",
+    "table_intro": "You are a DPV classification engine for tabular data.",
+    "supports_table": true,
+    "type_alias_prefixes": {}
   },
   {
     "cpa_intro": "You are a column relationship prediction engine. Predict the schema.org property relating the SUBJECT column to each TARGET column. Choose ONLY from the provided labels. If no relationship exists, choose moose:NONE. If a relationship exists but is not represented, choose moose:OTHER.",

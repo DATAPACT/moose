@@ -295,6 +295,69 @@ curl -sS -X POST "http://localhost:8000/schemas/coarse/ner" \
   }'
 ```
 
+#### Privacy annotation with DPV: two steps, decided by a System 1 model
+
+For personal data, prefer the `dpv_privacy` schema over `dpv`, for text and for tables. It
+holds 264 DPV concepts: personal-data categories, legal roles (controller, processor,
+recipient, third party) and data-subject types. Every decision is a classification, and a
+small "System 1" model, [Laya](https://huggingface.co/convaiinnovations/laya), makes it,
+with probabilities. The LLM adds what it knows:
+
+1. **Find and describe.** The LLM finds the mentions in a text, or the personal-data
+   columns of a table, and describes each in a few words. The prompt has no type list.
+2. **Retrieve candidates.** Moose matches each description against concept labels and
+   definitions (BM25, no extra model). It widens the best hits with their direct parents
+   and children.
+3. **Decide.** Laya scores every candidate in one forward pass. Where its top probability
+   is below 0.6, Moose asks the LLM, adds the LLM's choice to Laya's input, and Laya
+   decides again. The reported `confidence` is always Laya's probability.
+
+A request can choose who decides with `"linker"`:
+
+| `linker` | Who decides | LLM calls |
+|---|---|---|
+| `system1+llm` (default with Laya) | Laya, consulting the LLM when unsure | 1, plus 1 when any item is unsure |
+| `system1` | Laya alone | 1 |
+| `llm` (default without Laya) | The LLM; Laya gives the probability of its choice | 2 |
+
+Each entity or column reports:
+- `confidence`;
+- `calibrated`: whether Laya's probabilities were checked against labelled data for this
+  task;
+- `decided_by`;
+- `llm_suggestion`, when the LLM was consulted;
+- `category`: the LLM's description;
+- `candidates`;
+- `ranking`: Laya's top 3.
+
+On DPVCallBench (train and dev, 1,093 mentions with the right span), the default:
+- picks the right concept 80.1% of the time, against 77.1% for the LLM alone and 79.0% for
+  Laya alone;
+- has a mean confidence of 0.801, so its calibration error is 0.03 (0.20 for the LLM's
+  stated confidence);
+- asks the LLM about 16% of mentions.
+
+Against `dpv`, two-step costs about 1/20 as much on dev (about 1,100 prompt tokens per text
+instead of 98,000) and scores higher: span + concept F1 0.63 against 0.37. Table
+probabilities are reported with `"calibrated": false` until they are checked on labelled
+tables.
+
+Laya is optional. Build the API image with `MOOSE_EXTRAS=laya` in `.env`, which adds CPU
+PyTorch, about 1 GB. Its model, about 800 MB, downloads into a Docker volume on first use.
+`MOOSE_LAYA_MODEL` points to another checkpoint, for example a fine-tuned folder.
+
+Any schema can use this mode through its registry entry:
+- `"candidate_mode": "two_step"`;
+- `"candidate_k"`: retrieved candidates per item, 8 by default;
+- `"mention_guidance"`: what to look for, in plain words;
+- `"linker"`;
+- `"linker_calibration"`: the Laya checkpoint, the consult threshold, and the tasks it was
+  validated for.
+
+It works best when the type source gives each type a label, a definition and optionally
+its `parents`. `scripts/build_dpv_privacy_subset.py` rebuilds the DPV subset, and
+`research/dpv_eval/fit_system1.py` refits the threshold.
+
 ### 3) Table annotation (schema-specific)
 
 ```bash

@@ -81,6 +81,46 @@ FINE_TO_COARSE = {
     "ANATOMY": "CONCEPT",
 }
 
+# One-line definitions, so the System 1 model and the LLM can tell the types apart.
+TYPE_DEFINITIONS = {
+    "PERSON": "A named person, real or (in the fine schema's FICTIONAL_CHARACTER) fictional.",
+    "ORGANIZATION": "A named organisation: company, institution, agency, team or group.",
+    "LOCATION": "A named place: country, city, region, landmark or celestial body.",
+    "EVENT": "A named event: conflict, sports event, festival, incident or other occurrence.",
+    "WORK": "A named creative or intellectual work: film, book, music, software or meme.",
+    "PRODUCT": "A named product: device, medication, food or drink, or other manufactured good.",
+    "CONCEPT": "A named abstract concept: language, law, scientific theory, taxon or body part.",
+    "MISC": "A named entity that fits none of the other types.",
+    "FICTIONAL_CHARACTER": "A character from fiction: a novel, film, game or myth.",
+    "COMPANY": "A business or commercial company.",
+    "NONPROFIT_ORG": "A non-profit organisation, charity or NGO.",
+    "GOVERNMENT_ORG": "A government body, ministry, agency or public authority.",
+    "EDUCATIONAL_ORG": "A school, university or other educational institution.",
+    "SPORTS_TEAM": "A sports team or club.",
+    "COUNTRY": "A country or sovereign state.",
+    "CITY": "A city, town or village.",
+    "REGION": "A region, state, province, county or other area within or across countries.",
+    "LANDMARK": "A building, monument, natural landmark or other specific site.",
+    "CELESTIAL_BODY": "A planet, star, moon or other astronomical object.",
+    "CONFLICT": "A war, battle or armed conflict.",
+    "SPORT_EVENT": "A sports competition, tournament, match or race.",
+    "EVENT_GENERIC": "Another named event: festival, conference, disaster or ceremony.",
+    "FILM": "A film, movie or television series.",
+    "BOOK": "A book, novel or other written publication.",
+    "MUSIC_WORK": "A song, album or other musical work.",
+    "SOFTWARE": "A software product, application, programming language or online service.",
+    "INTERNET_MEME": "An internet meme or viral online phenomenon.",
+    "DEVICE": "A device, machine, vehicle or piece of hardware.",
+    "MEDICATION": "A medicine, drug or pharmaceutical product.",
+    "FOOD_BEVERAGE": "A food, dish or drink.",
+    "PRODUCT_GENERIC": "Another named product or brand.",
+    "LANGUAGE": "A human language or dialect.",
+    "LAW": "A law, regulation, treaty or legal act.",
+    "SCIENTIFIC_THEORY": "A scientific theory, principle, model or method.",
+    "BIOLOGICAL_TAXON": "A species, genus or other biological group of organisms.",
+    "ANATOMY": "A part of the body, organ or anatomical structure.",
+}
+
 DATA_DIR = Path(__file__).resolve().parent / "data"
 VOCAB_REGISTRY_PATH = DATA_DIR / "vocabularies.json"
 USER_VOCAB_REGISTRY_PATH = DATA_DIR / "user_vocabularies.json"
@@ -88,6 +128,16 @@ USER_VOCAB_REGISTRY_PATH = DATA_DIR / "user_vocabularies.json"
 DEFAULT_TEXT_INTRO = "You are a high-precision NER engine."
 DEFAULT_TABLE_INTRO = "You are a semantic typing engine for tabular data."
 DEFAULT_CPA_INTRO = "You are a column relationship prediction engine."
+
+# "all": every type id is in one prompt. "two_step": the LLM first finds mentions and
+# describes them, then each mention's type is chosen among a few retrieved candidates,
+# by the System 1 model where available (see moose.linkers). "auto": two_step when the
+# System 1 model is installed, "all" otherwise.
+CANDIDATE_MODES = ("all", "two_step", "auto")
+DEFAULT_CANDIDATE_K = 8
+# Two-step mode, step 2: who chooses among the candidates (see moose.linkers). "auto" is
+# System 1 with LLM help when Laya is installed, the LLM otherwise.
+LINKERS = ("auto", "system1+llm", "system1", "llm")
 
 
 @dataclass(frozen=True)
@@ -108,6 +158,33 @@ class SchemaConfig:
     supports_text: bool = True
     supports_table: bool = True
     supports_cpa: bool = False
+    candidate_mode: str = "all"
+    candidate_k: int = DEFAULT_CANDIDATE_K
+    # Two-step mode: what kind of mention to look for, in plain words, and extra span rules
+    # (replacing the default one: values and mentions of a kind of thing both count).
+    mention_guidance: str | None = None
+    mention_rules: tuple[str, ...] | None = None
+    linker: str = "auto"
+    # System 1 settings for this schema's candidates (Laya checkpoint, when to consult the
+    # LLM, which tasks its probabilities were validated on).
+    linker_calibration: Path | None = DATA_DIR / "linkers" / "laya_zero_shot.json"
+
+    def load_type_records(self) -> list[dict[str, Any]]:
+        """Types with their label, alternative labels, definition and parents, where the source has them."""
+        if self.type_ids is not None:
+            return [
+                {
+                    "id": type_id,
+                    "label": type_id.replace("_", " ").lower(),
+                    "alt_labels": [],
+                    "definition": TYPE_DEFINITIONS.get(type_id),
+                    "parents": [],
+                }
+                for type_id in self.type_ids
+            ]
+        if self.data_path is None:
+            raise ValueError(f"Schema {self.name} has no type source configured.")
+        return [dict(record) for record in _load_type_records(self.data_path)]
 
     def load_type_ids(self) -> list[str]:
         if self.type_ids is not None:
@@ -134,6 +211,72 @@ def _extract_type_ids(data: Any) -> list[str]:
                     type_ids.append(type_id)
         return type_ids
     return []
+
+
+def _first_text(item: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+RDFS_CLASS = "http://www.w3.org/2000/01/rdf-schema#Class"
+
+
+@lru_cache
+def _concept_files(directory: Path) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
+    """Concept records and parents from the nearest concepts.json / concept_parents.json
+    at or above `directory` (within the data folder), nearest first."""
+    concepts: dict[str, dict[str, Any]] = {}
+    parents: dict[str, list[str]] = {}
+    current = directory
+    while True:
+        if (current / "concepts.json").exists():
+            for item in json.loads((current / "concepts.json").read_text(encoding="utf-8")):
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    concepts.setdefault(item["id"], item)
+        if (current / "concept_parents.json").exists():
+            for key, value in json.loads((current / "concept_parents.json").read_text(encoding="utf-8")).items():
+                parents.setdefault(key, value)
+        if current == DATA_DIR or current == current.parent or DATA_DIR not in current.parents:
+            break
+        current = current.parent
+    return concepts, parents
+
+
+@lru_cache
+def _load_type_records(path: Path) -> tuple[dict[str, Any], ...]:
+    """Types with label, alternative labels, definition and parents. Bare type ids are
+    looked up in the nearest DPV-style concept files; entries known not to be classes
+    (properties, documentation pages) are left out, since they cannot type a mention."""
+    with path.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if isinstance(data, dict):
+        for key in ("types", "type_ids", "items", "data"):
+            if key in data:
+                data = data[key]
+                break
+    concepts, parents = _concept_files(path.parent)
+    records = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, str):
+            item = concepts.get(item) or {
+                "id": item, "label": item.replace("_", " ").lower(), "definition": TYPE_DEFINITIONS.get(item)
+            }
+        if not (isinstance(item, dict) and isinstance(item.get("id"), str)):
+            continue
+        if isinstance(item.get("types"), list) and item["types"] and RDFS_CLASS not in item["types"]:
+            continue
+        alt = item.get("alt_labels") or item.get("aliases") or []
+        records.append({
+            "id": item["id"],
+            "label": _first_text(item, ("label", "name", "title")) or item["id"],
+            "alt_labels": [a for a in alt if isinstance(a, str)] if isinstance(alt, list) else [],
+            "definition": _first_text(item, ("definition", "description", "comment")),
+            "parents": [p for p in item.get("parents") or parents.get(item["id"], []) if isinstance(p, str)],
+        })
+    return tuple(records)
 
 
 @lru_cache
@@ -205,6 +348,29 @@ def _parse_bool_field(entry: dict[str, Any], key: str, default: bool) -> bool:
     return value
 
 
+def _parse_linker(entry: dict[str, Any]) -> tuple[str, Path | None]:
+    linker = entry.get("linker", "auto")
+    if linker not in LINKERS:
+        raise ValueError(f"linker must be one of {', '.join(LINKERS)}.")
+    calibration = entry.get("linker_calibration")
+    if calibration is None:
+        return linker, DATA_DIR / "linkers" / "laya_zero_shot.json"
+    if not isinstance(calibration, str) or not calibration.strip():
+        raise ValueError("linker_calibration must be a path.")
+    path = Path(calibration.strip())
+    return linker, path if path.is_absolute() else DATA_DIR / path
+
+
+def _parse_candidate_mode(entry: dict[str, Any]) -> tuple[str, int]:
+    mode = entry.get("candidate_mode", "all")
+    if mode not in CANDIDATE_MODES:
+        raise ValueError(f"candidate_mode must be one of {', '.join(CANDIDATE_MODES)}.")
+    k = entry.get("candidate_k", DEFAULT_CANDIDATE_K)
+    if not isinstance(k, int) or isinstance(k, bool) or not 1 <= k <= 50:
+        raise ValueError("candidate_k must be an integer from 1 to 50.")
+    return mode, k
+
+
 def _load_vocab_registry_entries(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -266,6 +432,10 @@ def _schema_registry() -> dict[str, SchemaConfig]:
                 data_path = DATA_DIR / data_path
             label = entry.get("label")
             description = entry.get("description")
+            candidate_mode, candidate_k = _parse_candidate_mode(entry)
+            linker, linker_calibration = _parse_linker(entry)
+            mention_guidance = entry.get("mention_guidance")
+            mention_rules = entry.get("mention_rules")
             registry[name] = SchemaConfig(
                 name=name,
                 label=label.strip() if isinstance(label, str) and label.strip() else name,
@@ -284,6 +454,12 @@ def _schema_registry() -> dict[str, SchemaConfig]:
                 supports_text=_parse_bool_field(entry, "supports_text", True),
                 supports_table=_parse_bool_field(entry, "supports_table", True),
                 supports_cpa=_parse_bool_field(entry, "supports_cpa", False),
+                candidate_mode=candidate_mode,
+                candidate_k=candidate_k,
+                linker=linker,
+                linker_calibration=linker_calibration,
+                mention_guidance=mention_guidance.strip() if isinstance(mention_guidance, str) and mention_guidance.strip() else None,
+                mention_rules=tuple(r for r in mention_rules if isinstance(r, str) and r.strip()) if isinstance(mention_rules, list) else None,
             )
     return registry
 
@@ -294,6 +470,8 @@ def list_schema_names() -> list[str]:
 
 def reload_schema_registry() -> list[str]:
     _load_vocab_file.cache_clear()
+    _load_type_records.cache_clear()
+    _concept_files.cache_clear()
     _schema_registry.cache_clear()
     return list_schema_names()
 

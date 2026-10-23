@@ -19,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from moose.config import Settings, get_settings
 from moose.ingest import delete_user_schema, preview_schema_payload, update_user_schema_metadata
 from moose.pipelines import load_privacy_profiles
+from moose.linkers import LINKERS, SYSTEM1_LINKERS, Calibration, system1_ready
+from moose.ner import resolve_linker, two_step_active
 from moose.schema import get_schema_config, list_schema_names, reload_schema_registry
 from moose.privacy import get_machine_report_json_schema, list_policy_packs
 from moose.vault import VaultError
@@ -49,12 +51,25 @@ class LLMOptions(BaseModel):
 # -----------------------
 # Text NER request models
 # -----------------------
+LINKER_FIELD = Field(
+    default=None,
+    description=(
+        "Two-step schemas only: who chooses each item's type (a mention, a column) among its candidates. "
+        "'system1+llm': the System 1 model (Laya) decides and consults the LLM when unsure; "
+        "'system1': Laya alone, no extra LLM call; 'llm': the LLM decides. With Laya, every "
+        "confidence is Laya's probability. Defaults to system1+llm when Laya is installed."
+    ),
+)
+Linker = Literal[LINKERS]
+
+
 class BaseNERRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     llm: LLMOptions = Field(default_factory=LLMOptions)
 
     text: str = Field(min_length=1)
+    linker: Linker | None = LINKER_FIELD
 
     @field_validator("text")
     @classmethod
@@ -92,6 +107,7 @@ class BaseTabularRequest(BaseModel):
 
     table_id: str | None = None
     sampled_rows: list[dict[str, Any]] = Field(min_length=1)
+    linker: Linker | None = LINKER_FIELD
 
 
 class TabularRequest(BaseTabularRequest):
@@ -450,11 +466,17 @@ def _ensure_schema_supported(
     require_text: bool = False,
     require_table: bool = False,
     require_cpa: bool = False,
+    linker: str | None = None,
 ) -> None:
     try:
         config = get_schema_config(schema)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if linker is not None and config.candidate_mode == "all":
+        raise HTTPException(status_code=400, detail=f"Schema '{schema}' annotates in one step; 'linker' applies only to two-step schemas.")
+    if linker in SYSTEM1_LINKERS and not system1_ready(Calibration.load(config.linker_calibration)):
+        raise HTTPException(status_code=400, detail='The System 1 model (Laya) is not available on this server; use "linker": "llm".')
 
     if require_text and not config.supports_text:
         raise HTTPException(status_code=400, detail=f"Schema '{schema}' does not support text annotation.")
@@ -648,12 +670,14 @@ def _build_schema_ingest_payload(request: SchemaIngestRequest) -> dict[str, Any]
 async def submit_ner(
     request: NERRequest,
 ):
-    _ensure_schema_supported(request.schema_name, require_text=True)
+    _ensure_schema_supported(request.schema_name, require_text=True, linker=request.linker)
 
     payload = {
         "schema": request.schema_name,
         "text": request.text,
     }
+    if request.linker:
+        payload["linker"] = request.linker
     job_id = await _enqueue_job("ner", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
@@ -663,12 +687,14 @@ async def submit_schema_ner(
     schema: str,
     request: SchemaNERRequest,
 ):
-    _ensure_schema_supported(schema, require_text=True)
+    _ensure_schema_supported(schema, require_text=True, linker=request.linker)
 
     payload = {
         "schema": schema,
         "text": request.text,
     }
+    if request.linker:
+        payload["linker"] = request.linker
     job_id = await _enqueue_job("ner", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
@@ -677,7 +703,7 @@ async def submit_schema_ner(
 async def submit_dpv_ner(
     request: DpvNERRequest,
 ):
-    _ensure_schema_supported("dpv", require_text=True)
+    _ensure_schema_supported("dpv", require_text=True, linker=request.linker)
 
     payload = {
         "schema": "dpv",
@@ -694,13 +720,15 @@ async def submit_dpv_ner(
 async def submit_tabular(
     request: TabularRequest,
 ):
-    _ensure_schema_supported(request.schema_name, require_table=True)
+    _ensure_schema_supported(request.schema_name, require_table=True, linker=request.linker)
 
     payload = {
         "schema": request.schema_name,
         "table_id": request.table_id,
         "sampled_rows": request.sampled_rows,
     }
+    if request.linker:
+        payload["linker"] = request.linker
     job_id = await _enqueue_job("tabular", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
@@ -710,13 +738,15 @@ async def submit_schema_tabular(
     schema: str,
     request: SchemaTabularRequest,
 ):
-    _ensure_schema_supported(schema, require_table=True)
+    _ensure_schema_supported(schema, require_table=True, linker=request.linker)
 
     payload = {
         "schema": schema,
         "table_id": request.table_id,
         "sampled_rows": request.sampled_rows,
     }
+    if request.linker:
+        payload["linker"] = request.linker
     job_id = await _enqueue_job("tabular", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
@@ -725,13 +755,15 @@ async def submit_schema_tabular(
 async def submit_dpv_tabular(
     request: DpvTabularRequest,
 ):
-    _ensure_schema_supported("dpv", require_table=True)
+    _ensure_schema_supported("dpv", require_table=True, linker=request.linker)
 
     payload = {
         "schema": "dpv",
         "table_id": request.table_id,
         "sampled_rows": request.sampled_rows,
     }
+    if request.linker:
+        payload["linker"] = request.linker
     job_id = await _enqueue_job("tabular", payload, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
@@ -953,7 +985,17 @@ async def list_schemas(include_type_count: bool = False) -> dict[str, Any]:
             "supports_cpa": bool(getattr(cfg, "supports_cpa", False)),
             "prefilter_types": bool(getattr(cfg, "prefilter_types", False)),
             "score_mode": "dense" if cfg.require_all_scores else "sparse",
+            "candidate_mode": cfg.candidate_mode,
         }
+        if cfg.candidate_mode != "all":
+            # How this server annotates with the schema: "auto" schemas are two-step only when
+            # the System 1 model (Laya) is installed. System 1 linkers need Laya and a calibration.
+            calibration = Calibration.load(cfg.linker_calibration)
+            item["candidate_mode"] = "two_step" if two_step_active(cfg) else "all"
+            if item["candidate_mode"] == "two_step":
+                item["linker"] = resolve_linker(None, calibration, cfg.linker)
+                item["linkers"] = list(LINKERS) if system1_ready(calibration) else ["llm"]
+                item["system1_validated"] = bool(calibration and calibration.validated_for)
         if include_type_count:
             try:
                 item["type_count"] = len(cfg.load_type_ids())

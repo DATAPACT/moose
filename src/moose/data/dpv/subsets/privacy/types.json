@@ -1,0 +1,2354 @@
+{
+ "types": [
+  {
+   "id": "dpv-pd:Accent",
+   "label": "Accent",
+   "alt_labels": [],
+   "definition": "Information about linguistic and speech accents",
+   "parents": [
+    "dpv-pd:Language"
+   ]
+  },
+  {
+   "id": "dpv-pd:AccountIdentifier",
+   "label": "Account Identifier",
+   "alt_labels": [],
+   "definition": "Information about financial account identifier",
+   "parents": [
+    "dpv-pd:FinancialAccount"
+   ]
+  },
+  {
+   "id": "dpv-pd:Acquaintance",
+   "label": "Acquaintance",
+   "alt_labels": [],
+   "definition": "Information about acquaintances in a social network",
+   "parents": [
+    "dpv-pd:SocialNetwork"
+   ]
+  },
+  {
+   "id": "dpv-pd:Age",
+   "label": "Age",
+   "alt_labels": [],
+   "definition": "Information about age",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:AgeExact",
+   "label": "Age Exact",
+   "alt_labels": [],
+   "definition": "Information about the exact age (i.e. to some degree within a year, month, or day)",
+   "parents": [
+    "dpv-pd:AgeRange"
+   ]
+  },
+  {
+   "id": "dpv-pd:AgeRange",
+   "label": "Age Range",
+   "alt_labels": [],
+   "definition": "Information about age range i.e. inexact age to some degree (i.e. some years)",
+   "parents": [
+    "dpv-pd:Age"
+   ]
+  },
+  {
+   "id": "dpv-pd:ApartmentOwned",
+   "label": "Apartment Owned",
+   "alt_labels": [],
+   "definition": "Information about apartment(s) owned and its history",
+   "parents": [
+    "dpv-pd:HouseOwned"
+   ]
+  },
+  {
+   "id": "dpv-pd:Association",
+   "label": "Association",
+   "alt_labels": [],
+   "definition": "Information about associations in a social network with other individuals, groups, or entities e.g. friend of a friend",
+   "parents": [
+    "dpv-pd:SocialNetwork"
+   ]
+  },
+  {
+   "id": "dpv-pd:Attitude",
+   "label": "Attitude",
+   "alt_labels": [],
+   "definition": "Information about attitude",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:Authenticating",
+   "label": "Authenticating",
+   "alt_labels": [],
+   "definition": "Information about authentication and information used for authenticating",
+   "parents": [
+    "dpv-pd:Internal"
+   ]
+  },
+  {
+   "id": "dpv-pd:AuthenticationHistory",
+   "label": "Authentication History",
+   "alt_labels": [],
+   "definition": "Information about prior authentication and its outcomes such as login attempts or location",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:BankAccount",
+   "label": "Bank Account",
+   "alt_labels": [],
+   "definition": "Information about bank accounts",
+   "parents": [
+    "dpv-pd:FinancialAccount"
+   ]
+  },
+  {
+   "id": "dpv-pd:Behavioural",
+   "label": "Behavioural",
+   "alt_labels": [],
+   "definition": "Information about behaviour or activity",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:Biometric",
+   "label": "Biometric",
+   "alt_labels": [],
+   "definition": "Information about biometrics and biometric characteristics.",
+   "parents": [
+    "dpv-pd:Identifying"
+   ]
+  },
+  {
+   "id": "dpv-pd:BirthCountry",
+   "label": "Birth Country",
+   "alt_labels": [],
+   "definition": "Information about country of birth",
+   "parents": [
+    "dpv-pd:BirthPlace"
+   ]
+  },
+  {
+   "id": "dpv-pd:BirthDate",
+   "label": "Birth Date",
+   "alt_labels": [],
+   "definition": "Information about birth date",
+   "parents": [
+    "dpv-pd:Age"
+   ]
+  },
+  {
+   "id": "dpv-pd:BirthPlace",
+   "label": "Birth Place",
+   "alt_labels": [],
+   "definition": "Information about birth place",
+   "parents": [
+    "dpv-pd:Location"
+   ]
+  },
+  {
+   "id": "dpv-pd:BloodType",
+   "label": "Blood Type",
+   "alt_labels": [],
+   "definition": "Information about blood type",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:BrowserFingerprint",
+   "label": "Browser Fingerprint",
+   "alt_labels": [],
+   "definition": "Information about the web browser which is used as a 'fingerprint'",
+   "parents": [
+    "dpv-pd:DeviceBased"
+   ]
+  },
+  {
+   "id": "dpv-pd:BrowserHistory",
+   "label": "Browser History",
+   "alt_labels": [],
+   "definition": "Information about and including web browsing history",
+   "parents": [
+    "dpv-pd:BrowsingBehaviour"
+   ]
+  },
+  {
+   "id": "dpv-pd:BrowsingBehaviour",
+   "label": "Browsing Behaviour",
+   "alt_labels": [],
+   "definition": "Information about browsing behaviour",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:BrowsingReferral",
+   "label": "Browsing Referral",
+   "alt_labels": [],
+   "definition": "Information about web browsing referrer or referral, which can be based on location, targeted referrals, direct, organic search, social media or actions, campaigns.",
+   "parents": [
+    "dpv-pd:BrowsingBehaviour"
+   ]
+  },
+  {
+   "id": "dpv-pd:CallLog",
+   "label": "Call Log",
+   "alt_labels": [],
+   "definition": "Information about the calls that an individual has made",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:CarOwned",
+   "label": "Car Owned",
+   "alt_labels": [],
+   "definition": "Information about cars ownership and ownership history",
+   "parents": [
+    "dpv-pd:Ownership"
+   ]
+  },
+  {
+   "id": "dpv-pd:Character",
+   "label": "Character",
+   "alt_labels": [],
+   "definition": "Information about character in the public sphere",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:Citizenship",
+   "label": "Citizenship",
+   "alt_labels": [],
+   "definition": "Information about citizenship",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:City",
+   "label": "City",
+   "alt_labels": [],
+   "definition": "Information about city as a location",
+   "parents": [
+    "dpv-pd:PhysicalAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:Communication",
+   "label": "Communication",
+   "alt_labels": [],
+   "definition": "Information communicated from or to an individual",
+   "parents": [
+    "dpv-pd:Social"
+   ]
+  },
+  {
+   "id": "dpv-pd:CommunicationsMetadata",
+   "label": "Communications Metadata",
+   "alt_labels": [],
+   "definition": "Information about communication metadata in the public sphere",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:Connection",
+   "label": "Connection",
+   "alt_labels": [],
+   "definition": "Information about and including connections in a social network",
+   "parents": [
+    "dpv-pd:SocialNetwork"
+   ]
+  },
+  {
+   "id": "dpv-pd:Contact",
+   "label": "Contact",
+   "alt_labels": [],
+   "definition": "Information about contacts or used for contacting e.g. email address or phone number",
+   "parents": [
+    "dpv-pd:Tracking"
+   ]
+  },
+  {
+   "id": "dpv-pd:Country",
+   "label": "Country",
+   "alt_labels": [],
+   "definition": "Information about country e.g. residence, travel",
+   "parents": [
+    "dpv-pd:Location"
+   ]
+  },
+  {
+   "id": "dpv-pd:Credit",
+   "label": "Credit",
+   "alt_labels": [],
+   "definition": "Information about reputation with regards to money",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:CreditCapacity",
+   "label": "Credit Capacity",
+   "alt_labels": [],
+   "definition": "Information about credit capacity",
+   "parents": [
+    "dpv-pd:Credit"
+   ]
+  },
+  {
+   "id": "dpv-pd:CreditCardNumber",
+   "label": "Credit Card Number",
+   "alt_labels": [],
+   "definition": "Information about credit card number",
+   "parents": [
+    "dpv-pd:PaymentCardNumber"
+   ]
+  },
+  {
+   "id": "dpv-pd:CreditRecord",
+   "label": "Credit Record",
+   "alt_labels": [],
+   "definition": "Information about credit record",
+   "parents": [
+    "dpv-pd:Credit"
+   ]
+  },
+  {
+   "id": "dpv-pd:CreditScore",
+   "label": "Credit Score",
+   "alt_labels": [],
+   "definition": "Information about credit score",
+   "parents": [
+    "dpv-pd:CreditWorthiness"
+   ]
+  },
+  {
+   "id": "dpv-pd:CreditStanding",
+   "label": "Credit Standing",
+   "alt_labels": [],
+   "definition": "Information about credit standing",
+   "parents": [
+    "dpv-pd:Credit"
+   ]
+  },
+  {
+   "id": "dpv-pd:CreditWorthiness",
+   "label": "Credit Worthiness",
+   "alt_labels": [],
+   "definition": "Information about credit worthiness",
+   "parents": [
+    "dpv-pd:Credit"
+   ]
+  },
+  {
+   "id": "dpv-pd:Criminal",
+   "label": "Criminal",
+   "alt_labels": [],
+   "definition": "Information about criminal activity e.g. criminal convictions or jail time",
+   "parents": [
+    "dpv-pd:Social"
+   ]
+  },
+  {
+   "id": "dpv-pd:CriminalCharge",
+   "label": "Criminal Charge",
+   "alt_labels": [],
+   "definition": "Information about criminal charges",
+   "parents": [
+    "dpv-pd:Criminal"
+   ]
+  },
+  {
+   "id": "dpv-pd:CriminalConviction",
+   "label": "Criminal Conviction",
+   "alt_labels": [],
+   "definition": "Information about criminal convictions",
+   "parents": [
+    "dpv-pd:Criminal"
+   ]
+  },
+  {
+   "id": "dpv-pd:CriminalOffence",
+   "label": "Criminal Offence",
+   "alt_labels": [],
+   "definition": "Information about criminal offences",
+   "parents": [
+    "dpv-pd:Criminal"
+   ]
+  },
+  {
+   "id": "dpv-pd:CriminalPardon",
+   "label": "Criminal Pardon",
+   "alt_labels": [],
+   "definition": "Information about criminal pardons",
+   "parents": [
+    "dpv-pd:Criminal"
+   ]
+  },
+  {
+   "id": "dpv-pd:CurrentEmployment",
+   "label": "Current Employment",
+   "alt_labels": [],
+   "definition": "Information about current employment",
+   "parents": [
+    "dpv-pd:EmploymentHistory"
+   ]
+  },
+  {
+   "id": "dpv-pd:DNACode",
+   "label": "DNA Code",
+   "alt_labels": [],
+   "definition": "Information about DNA",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:Demeanour",
+   "label": "Demeanour",
+   "alt_labels": [],
+   "definition": "Information about demeanour",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:Demographic",
+   "label": "Demographic",
+   "alt_labels": [],
+   "definition": "Information about demography and demographic characteristics",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:DeviceApplications",
+   "label": "Device Applications",
+   "alt_labels": [],
+   "definition": "Information about applications or application-like software on a device",
+   "parents": [
+    "dpv-pd:DeviceSoftware"
+   ]
+  },
+  {
+   "id": "dpv-pd:DeviceBased",
+   "label": "Device Based",
+   "alt_labels": [],
+   "definition": "Information about devices",
+   "parents": [
+    "dpv-pd:Tracking"
+   ]
+  },
+  {
+   "id": "dpv-pd:DeviceOperatingSystem",
+   "label": "Device Operating System",
+   "alt_labels": [],
+   "definition": "Information about the operating system (OS) or system software that manages hardware or software resources.",
+   "parents": [
+    "dpv-pd:DeviceSoftware"
+   ]
+  },
+  {
+   "id": "dpv-pd:DeviceSoftware",
+   "label": "Device Software",
+   "alt_labels": [],
+   "definition": "Information about software on or related to a device",
+   "parents": [
+    "dpv-pd:DeviceBased"
+   ]
+  },
+  {
+   "id": "dpv-pd:Dialect",
+   "label": "Dialect",
+   "alt_labels": [],
+   "definition": "Information about linguistic dialects",
+   "parents": [
+    "dpv-pd:Language"
+   ]
+  },
+  {
+   "id": "dpv-pd:DigitalFingerprint",
+   "label": "Digital Fingerprint",
+   "alt_labels": [],
+   "definition": "Information about a 'digital fingerprint' created for identification",
+   "parents": [
+    "dpv-pd:Tracking"
+   ]
+  },
+  {
+   "id": "dpv-pd:Disability",
+   "label": "Disability",
+   "alt_labels": [],
+   "definition": "Information about disabilities",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:DisciplinaryAction",
+   "label": "Disciplinary Action",
+   "alt_labels": [],
+   "definition": "Information about disciplinary actions and its history",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:Dislike",
+   "label": "Dislike",
+   "alt_labels": [],
+   "definition": "Information about dislikes or preferences regarding repulsions",
+   "parents": [
+    "dpv-pd:Interest"
+   ]
+  },
+  {
+   "id": "dpv-pd:Divorce",
+   "label": "Divorce",
+   "alt_labels": [],
+   "definition": "Information about divorce(s)",
+   "parents": [
+    "dpv-pd:FamilyStructure"
+   ]
+  },
+  {
+   "id": "dpv-pd:Domicile",
+   "label": "Domicile",
+   "alt_labels": [],
+   "definition": "Information about domicile status e.g. which region or country a person is domiciled in",
+   "parents": [
+    "dpv-pd:Location"
+   ]
+  },
+  {
+   "id": "dpv-pd:DrugTestResult",
+   "label": "Drug Test Result",
+   "alt_labels": [],
+   "definition": "Information about drug test results",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:Education",
+   "label": "Education",
+   "alt_labels": [],
+   "definition": "Information about education",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:EducationExperience",
+   "label": "Education Experience",
+   "alt_labels": [],
+   "definition": "Information about education experience e.g. attending a university",
+   "parents": [
+    "dpv-pd:Education"
+   ]
+  },
+  {
+   "id": "dpv-pd:EducationQualification",
+   "label": "Education Qualification",
+   "alt_labels": [],
+   "definition": "Information about educational qualifications",
+   "parents": [
+    "dpv-pd:Education"
+   ]
+  },
+  {
+   "id": "dpv-pd:EmailAddress",
+   "label": "Email Address",
+   "alt_labels": [],
+   "definition": "Information about email address",
+   "parents": [
+    "dpv-pd:Contact"
+   ]
+  },
+  {
+   "id": "dpv-pd:EmailAddressPersonal",
+   "label": "Email Address Personal",
+   "alt_labels": [],
+   "definition": "Information about email address used in personal capacity",
+   "parents": [
+    "dpv-pd:EmailAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:EmailAddressWork",
+   "label": "Email Address Work",
+   "alt_labels": [],
+   "definition": "Information about email address used for work or in professional capacity",
+   "parents": [
+    "dpv-pd:EmailAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:EmailContent",
+   "label": "Email Content",
+   "alt_labels": [],
+   "definition": "Information about the contents of emails sent or received",
+   "parents": [
+    "dpv-pd:Communication"
+   ]
+  },
+  {
+   "id": "dpv-pd:Emotion",
+   "label": "Emotion",
+   "alt_labels": [],
+   "definition": "Information about emotion",
+   "parents": [
+    "dpv-pd:Internal"
+   ]
+  },
+  {
+   "id": "dpv-pd:EmploymentHistory",
+   "label": "Employment History",
+   "alt_labels": [],
+   "definition": "Information about employment history",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:EthnicOrigin",
+   "label": "Ethnic Origin",
+   "alt_labels": [],
+   "definition": "Information about ethnic origin",
+   "parents": [
+    "dpv-pd:Ethnicity"
+   ]
+  },
+  {
+   "id": "dpv-pd:Ethnicity",
+   "label": "Ethnicity",
+   "alt_labels": [],
+   "definition": "Information about ethnic origins and lineage",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:External",
+   "label": "External",
+   "alt_labels": [],
+   "definition": "Information about external characteristics that can be observed",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:FacialExpression",
+   "label": "Facial Expression",
+   "alt_labels": [],
+   "definition": "Information about facial expression",
+   "parents": [
+    "dpv-pd:Biometric"
+   ]
+  },
+  {
+   "id": "dpv-pd:FacialPrint",
+   "label": "Facial Print",
+   "alt_labels": [],
+   "definition": "Information about facial print or pattern",
+   "parents": [
+    "dpv-pd:Biometric"
+   ]
+  },
+  {
+   "id": "dpv-pd:Family",
+   "label": "Family",
+   "alt_labels": [],
+   "definition": "Information about family and relationships",
+   "parents": [
+    "dpv-pd:Social"
+   ]
+  },
+  {
+   "id": "dpv-pd:FamilyHealthHistory",
+   "label": "Family Health History",
+   "alt_labels": [],
+   "definition": "Information about family health history",
+   "parents": [
+    "dpv-pd:HealthHistory"
+   ]
+  },
+  {
+   "id": "dpv-pd:FamilyStructure",
+   "label": "Family Structure",
+   "alt_labels": [],
+   "definition": "Information about family and familial structure",
+   "parents": [
+    "dpv-pd:Family"
+   ]
+  },
+  {
+   "id": "dpv-pd:Favourite",
+   "label": "Favourite",
+   "alt_labels": [],
+   "definition": "Information about favourites",
+   "parents": [
+    "dpv-pd:Preference"
+   ]
+  },
+  {
+   "id": "dpv-pd:FavouriteColour",
+   "label": "Favourite Colour",
+   "alt_labels": [],
+   "definition": "Information about favourite colour",
+   "parents": [
+    "dpv-pd:Favourite"
+   ]
+  },
+  {
+   "id": "dpv-pd:FavouriteFood",
+   "label": "Favourite Food",
+   "alt_labels": [],
+   "definition": "Information about favourite food",
+   "parents": [
+    "dpv-pd:Favourite"
+   ]
+  },
+  {
+   "id": "dpv-pd:FavouriteMusic",
+   "label": "Favourite Music",
+   "alt_labels": [],
+   "definition": "Information about favourite music",
+   "parents": [
+    "dpv-pd:Favourite"
+   ]
+  },
+  {
+   "id": "dpv-pd:Fetish",
+   "label": "Fetish",
+   "alt_labels": [],
+   "definition": "Information about an individual's sexual fetishes",
+   "parents": [
+    "dpv-pd:Sexual"
+   ]
+  },
+  {
+   "id": "dpv-pd:Financial",
+   "label": "Financial",
+   "alt_labels": [],
+   "definition": "Information about finance including monetary characteristics and transactions",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:FinancialAccount",
+   "label": "Financial Account",
+   "alt_labels": [],
+   "definition": "Information about financial accounts",
+   "parents": [
+    "dpv-pd:Financial"
+   ]
+  },
+  {
+   "id": "dpv-pd:FinancialAccountNumber",
+   "label": "Financial Account Number",
+   "alt_labels": [],
+   "definition": "Information about financial account number",
+   "parents": [
+    "dpv-pd:AccountIdentifier"
+   ]
+  },
+  {
+   "id": "dpv-pd:FinancialStatus",
+   "label": "Financial Status",
+   "alt_labels": [],
+   "definition": "Information about financial status or standing",
+   "parents": [
+    "dpv-pd:Financial"
+   ]
+  },
+  {
+   "id": "dpv-pd:Fingerprint",
+   "label": "Fingerprint",
+   "alt_labels": [],
+   "definition": "Information about fingerprint used for biometric purposes",
+   "parents": [
+    "dpv-pd:Biometric"
+   ]
+  },
+  {
+   "id": "dpv-pd:Friend",
+   "label": "Friend",
+   "alt_labels": [],
+   "definition": "Information about friends in a social network, including aspects of friendships such as years together or nature of friendship",
+   "parents": [
+    "dpv-pd:SocialNetwork"
+   ]
+  },
+  {
+   "id": "dpv-pd:GPSCoordinate",
+   "label": "GPS Coordinate",
+   "alt_labels": [],
+   "definition": "Information about location expressed using Global Position System coordinates (GPS)",
+   "parents": [
+    "dpv-pd:Location"
+   ]
+  },
+  {
+   "id": "dpv-pd:Gender",
+   "label": "Gender",
+   "alt_labels": [],
+   "definition": "Information about gender",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:GeneralReputation",
+   "label": "General Reputation",
+   "alt_labels": [],
+   "definition": "Information about reputation in the public sphere",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:Genetic",
+   "label": "Genetic",
+   "alt_labels": [],
+   "definition": "Information about inherited or acquired genetic characteristics",
+   "parents": [
+    "dpv-pd:Health"
+   ]
+  },
+  {
+   "id": "dpv-pd:Geographic",
+   "label": "Geographic",
+   "alt_labels": [],
+   "definition": "Information about location or based on geography (e.g. home address)",
+   "parents": [
+    "dpv-pd:Demographic"
+   ]
+  },
+  {
+   "id": "dpv-pd:GroupMembership",
+   "label": "Group Membership",
+   "alt_labels": [],
+   "definition": "Information about groups and memberships included or associated with a social network",
+   "parents": [
+    "dpv-pd:SocialNetwork"
+   ]
+  },
+  {
+   "id": "dpv-pd:GroupProfile",
+   "label": "Group Profile",
+   "alt_labels": [],
+   "definition": "Group profile or category profile is information and representation of characteristics associated with a group or category of individuals",
+   "parents": [
+    "dpv-pd:Profile"
+   ]
+  },
+  {
+   "id": "dpv-pd:HairColour",
+   "label": "Hair Colour",
+   "alt_labels": [],
+   "definition": "Information about hair colour",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:Health",
+   "label": "Health",
+   "alt_labels": [],
+   "definition": "Information about health",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:HealthHistory",
+   "label": "Health History",
+   "alt_labels": [],
+   "definition": "Information about health history",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:HealthRecord",
+   "label": "Health Record",
+   "alt_labels": [],
+   "definition": "Information about health record",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:Height",
+   "label": "Height",
+   "alt_labels": [],
+   "definition": "Information about physical height",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:Historical",
+   "label": "Historical",
+   "alt_labels": [],
+   "definition": "Information about historical data related to or relevant regarding history or past events",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:HouseNumber",
+   "label": "House Number",
+   "alt_labels": [],
+   "definition": "Information about house or apartment number as a location",
+   "parents": [
+    "dpv-pd:PhysicalAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:HouseOwned",
+   "label": "House Owned",
+   "alt_labels": [],
+   "definition": "Information about house(s) owned and ownership history",
+   "parents": [
+    "dpv-pd:Ownership"
+   ]
+  },
+  {
+   "id": "dpv-pd:Household",
+   "label": "Household",
+   "alt_labels": [],
+   "definition": "Information about personal or household activities",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:IPAddress",
+   "label": "IP Address",
+   "alt_labels": [],
+   "definition": "Information about the Internet Protocol (IP) address of a device",
+   "parents": [
+    "dpv-pd:DeviceBased"
+   ]
+  },
+  {
+   "id": "dpv-pd:Identifier",
+   "label": "Identifier",
+   "alt_labels": [],
+   "definition": "Information about an identifier or name used for identification",
+   "parents": [
+    "dpv-pd:Tracking"
+   ]
+  },
+  {
+   "id": "dpv-pd:Identifying",
+   "label": "Identifying",
+   "alt_labels": [],
+   "definition": "Information that uniquely or semi-uniquely identifies an individual or a group",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:Income",
+   "label": "Income",
+   "alt_labels": [],
+   "definition": "Information about financial income e.g. for individual or household or family",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:IncomeBracket",
+   "label": "Income Bracket",
+   "alt_labels": [],
+   "definition": "Information about income bracket",
+   "parents": [
+    "dpv-pd:Demographic"
+   ]
+  },
+  {
+   "id": "dpv-pd:IndividualHealthHistory",
+   "label": "Individual Health History",
+   "alt_labels": [],
+   "definition": "Information about information health history",
+   "parents": [
+    "dpv-pd:HealthHistory"
+   ]
+  },
+  {
+   "id": "dpv-pd:IndividualProfile",
+   "label": "Individual Profile",
+   "alt_labels": [],
+   "definition": "Individual profile or user profile is information and representation of characteristics associated with a specific individual",
+   "parents": [
+    "dpv-pd:Profile"
+   ]
+  },
+  {
+   "id": "dpv-pd:Insurance",
+   "label": "Insurance",
+   "alt_labels": [],
+   "definition": "Information about Insurance",
+   "parents": [
+    "dpv-pd:Financial"
+   ]
+  },
+  {
+   "id": "dpv-pd:Intention",
+   "label": "Intention",
+   "alt_labels": [],
+   "definition": "Information about intentions",
+   "parents": [
+    "dpv-pd:Preference"
+   ]
+  },
+  {
+   "id": "dpv-pd:Interaction",
+   "label": "Interaction",
+   "alt_labels": [],
+   "definition": "Information about interactions in the public sphere",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:Interest",
+   "label": "Interest",
+   "alt_labels": [],
+   "definition": "Information about interests",
+   "parents": [
+    "dpv-pd:Preference"
+   ]
+  },
+  {
+   "id": "dpv-pd:Internal",
+   "label": "Internal",
+   "alt_labels": [],
+   "definition": "Information about internal characteristics that cannot be seen or observed",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:Job",
+   "label": "Job",
+   "alt_labels": [],
+   "definition": "Information about professional jobs",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:KnowledgeBelief",
+   "label": "Knowledge and Beliefs",
+   "alt_labels": [],
+   "definition": "Information about knowledge and beliefs",
+   "parents": [
+    "dpv-pd:Internal"
+   ]
+  },
+  {
+   "id": "dpv-pd:Language",
+   "label": "Language",
+   "alt_labels": [],
+   "definition": "Information about language and lingual history",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:LifeHistory",
+   "label": "Life History",
+   "alt_labels": [],
+   "definition": "Information about personal history regarding events or activities - including  their occurrences that might be directly related or have had an influence (e.g. World War, 9/11)",
+   "parents": [
+    "dpv-pd:Historical"
+   ]
+  },
+  {
+   "id": "dpv-pd:Like",
+   "label": "Like",
+   "alt_labels": [],
+   "definition": "Information about likes or preferences regarding attractions",
+   "parents": [
+    "dpv-pd:Interest"
+   ]
+  },
+  {
+   "id": "dpv-pd:LinkClicked",
+   "label": "Link Clicked",
+   "alt_labels": [],
+   "definition": "Information about the links that an individual has clicked",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:LoanRecord",
+   "label": "Loan Record",
+   "alt_labels": [],
+   "definition": "Information about loans, whether applied, provided or rejected, and its history",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:Locality",
+   "label": "Locality",
+   "alt_labels": [],
+   "definition": "Information about locality e.g. city, village, town, portion of a city as a location",
+   "parents": [
+    "dpv-pd:PhysicalAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:Location",
+   "label": "Location",
+   "alt_labels": [],
+   "definition": "Information about location",
+   "parents": [
+    "dpv-pd:Tracking"
+   ]
+  },
+  {
+   "id": "dpv-pd:MACAddress",
+   "label": "MAC Address",
+   "alt_labels": [],
+   "definition": "Information about the Media Access Control (MAC) address of a device",
+   "parents": [
+    "dpv-pd:DeviceBased"
+   ]
+  },
+  {
+   "id": "dpv-pd:MaritalStatus",
+   "label": "Marital Status",
+   "alt_labels": [],
+   "definition": "Information about marital status and history",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:Marriage",
+   "label": "Marriage",
+   "alt_labels": [],
+   "definition": "Information about marriage(s)",
+   "parents": [
+    "dpv-pd:FamilyStructure"
+   ]
+  },
+  {
+   "id": "dpv-pd:MedicalHealth",
+   "label": "Medical Health",
+   "alt_labels": [],
+   "definition": "Information about health, medical conditions or health care",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:MentalHealth",
+   "label": "Mental Health",
+   "alt_labels": [],
+   "definition": "Information about mental health",
+   "parents": [
+    "dpv-pd:Health"
+   ]
+  },
+  {
+   "id": "dpv-pd:Mood",
+   "label": "Mood",
+   "alt_labels": [],
+   "definition": "Information about mood",
+   "parents": [
+    "dpv-pd:Internal"
+   ]
+  },
+  {
+   "id": "dpv-pd:Name",
+   "label": "Name",
+   "alt_labels": [],
+   "definition": "Information about names associated or used as given name or nickname",
+   "parents": [
+    "dpv-pd:Identifying"
+   ]
+  },
+  {
+   "id": "dpv-pd:Nationality",
+   "label": "Nationality",
+   "alt_labels": [],
+   "definition": "Information about nationality",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:OfficialID",
+   "label": "Official ID",
+   "alt_labels": [],
+   "definition": "Information about an official identifier or identification document",
+   "parents": [
+    "dpv-pd:Identifying"
+   ]
+  },
+  {
+   "id": "dpv-pd:Offspring",
+   "label": "Offspring",
+   "alt_labels": [],
+   "definition": "Information about offspring(s)",
+   "parents": [
+    "dpv-pd:FamilyStructure"
+   ]
+  },
+  {
+   "id": "dpv-pd:Opinion",
+   "label": "Opinion",
+   "alt_labels": [],
+   "definition": "Information about opinions",
+   "parents": [
+    "dpv-pd:Preference"
+   ]
+  },
+  {
+   "id": "dpv-pd:Ownership",
+   "label": "Ownership",
+   "alt_labels": [],
+   "definition": "Information about ownership and history, including renting, borrowing, possessions",
+   "parents": [
+    "dpv-pd:Financial"
+   ]
+  },
+  {
+   "id": "dpv-pd:PINCode",
+   "label": "PIN Code",
+   "alt_labels": [],
+   "definition": "Information about personal identification number (PIN), which is usually used in the process of authenticating the individual as an user accessing a system",
+   "parents": [
+    "dpv-pd:Authenticating"
+   ]
+  },
+  {
+   "id": "dpv-pd:Parent",
+   "label": "Parent",
+   "alt_labels": [],
+   "definition": "Information about parent(s)",
+   "parents": [
+    "dpv-pd:FamilyStructure"
+   ]
+  },
+  {
+   "id": "dpv-pd:Passport",
+   "label": "Passport",
+   "alt_labels": [],
+   "definition": "Information about passport",
+   "parents": [
+    "dpv-pd:OfficialID"
+   ]
+  },
+  {
+   "id": "dpv-pd:Password",
+   "label": "Password",
+   "alt_labels": [],
+   "definition": "Information about password used in the process of authenticating the individual as an user accessing a system.",
+   "parents": [
+    "dpv-pd:Authenticating"
+   ]
+  },
+  {
+   "id": "dpv-pd:PastEmployment",
+   "label": "Past Employment",
+   "alt_labels": [],
+   "definition": "Information about past employment",
+   "parents": [
+    "dpv-pd:EmploymentHistory"
+   ]
+  },
+  {
+   "id": "dpv-pd:PaymentCard",
+   "label": "Payment Card",
+   "alt_labels": [],
+   "definition": "Information about payment card such as credit and debit cards",
+   "parents": [
+    "dpv-pd:FinancialAccount"
+   ]
+  },
+  {
+   "id": "dpv-pd:PaymentCardExpiry",
+   "label": "Payment Card Expiry",
+   "alt_labels": [],
+   "definition": "Information about payment card expiry such as a date",
+   "parents": [
+    "dpv-pd:PaymentCard"
+   ]
+  },
+  {
+   "id": "dpv-pd:PaymentCardNumber",
+   "label": "Payment Card Number",
+   "alt_labels": [],
+   "definition": "Information about payment card number",
+   "parents": [
+    "dpv-pd:PaymentCard",
+    "dpv-pd:AccountIdentifier"
+   ]
+  },
+  {
+   "id": "dpv-pd:PerformanceAtWork",
+   "label": "Performance at Work",
+   "alt_labels": [],
+   "definition": "Information about performance at work or within work environments",
+   "parents": [
+    "dpv-pd:Behavioural",
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:PersonalDocuments",
+   "label": "Personal Documents",
+   "alt_labels": [],
+   "definition": "Information about and including personal documents e.g. diaries or journals",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:PersonalPossession",
+   "label": "Personal Possession",
+   "alt_labels": [],
+   "definition": "Information about personal possessions",
+   "parents": [
+    "dpv-pd:Ownership"
+   ]
+  },
+  {
+   "id": "dpv-pd:Personality",
+   "label": "Personality",
+   "alt_labels": [],
+   "definition": "Information about personality (e.g., categorization in terms of the Big Five personality traits)",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:PhilosophicalBelief",
+   "label": "Philosophical Belief",
+   "alt_labels": [],
+   "definition": "Information about philosophical beliefs",
+   "parents": [
+    "dpv-pd:KnowledgeBelief"
+   ]
+  },
+  {
+   "id": "dpv-pd:PhysicalAddress",
+   "label": "Physical Address",
+   "alt_labels": [],
+   "definition": "Information about physical address",
+   "parents": [
+    "dpv-pd:Contact",
+    "dpv-pd:Location"
+   ]
+  },
+  {
+   "id": "dpv-pd:PhysicalCharacteristic",
+   "label": "Physical Characteristic",
+   "alt_labels": [],
+   "definition": "Information about physical characteristics",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:PhysicalHealth",
+   "label": "Physical Health",
+   "alt_labels": [],
+   "definition": "Information about physical health",
+   "parents": [
+    "dpv-pd:Health"
+   ]
+  },
+  {
+   "id": "dpv-pd:PhysicalTrait",
+   "label": "Physical Trait",
+   "alt_labels": [],
+   "definition": "Information about defining traits or features regarding the body",
+   "parents": [
+    "dpv-pd:Demographic"
+   ]
+  },
+  {
+   "id": "dpv-pd:Picture",
+   "label": "Picture",
+   "alt_labels": [],
+   "definition": "Information about visual representation or image e.g. profile photo",
+   "parents": [
+    "dpv-pd:Identifying"
+   ]
+  },
+  {
+   "id": "dpv-pd:Piercing",
+   "label": "Piercing",
+   "alt_labels": [],
+   "definition": "Information about piercings",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:PoliticalAffiliation",
+   "label": "Political Affiliation",
+   "alt_labels": [],
+   "definition": "Information about political affiliation and history",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:PoliticalOpinion",
+   "label": "Political Opinion",
+   "alt_labels": [],
+   "definition": "Information about opinions regarding politics and political topics",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:PostalCode",
+   "label": "Postal Code",
+   "alt_labels": [],
+   "definition": "Information about postal code as a location",
+   "parents": [
+    "dpv-pd:PhysicalAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:Preference",
+   "label": "Preference",
+   "alt_labels": [],
+   "definition": "Information about preferences or interests",
+   "parents": [
+    "dpv-pd:Internal"
+   ]
+  },
+  {
+   "id": "dpv-pd:Prescription",
+   "label": "Prescription",
+   "alt_labels": [],
+   "definition": "Information about medical and pharmaceutical prescriptions",
+   "parents": [
+    "dpv-pd:MedicalHealth"
+   ]
+  },
+  {
+   "id": "dpv-pd:PrivacyPreference",
+   "label": "Privacy Preference",
+   "alt_labels": [],
+   "definition": "Information about privacy preferences",
+   "parents": [
+    "dpv-pd:Preference"
+   ]
+  },
+  {
+   "id": "dpv-pd:Proclivity",
+   "label": "Proclivity",
+   "alt_labels": [],
+   "definition": "Information about proclivities in a sexual context",
+   "parents": [
+    "dpv-pd:Sexual"
+   ]
+  },
+  {
+   "id": "dpv-pd:Professional",
+   "label": "Professional",
+   "alt_labels": [],
+   "definition": "Information about educational or professional career",
+   "parents": [
+    "dpv-pd:Social"
+   ]
+  },
+  {
+   "id": "dpv-pd:ProfessionalCertification",
+   "label": "Professional Certification",
+   "alt_labels": [],
+   "definition": "Information about professional certifications",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:ProfessionalEvaluation",
+   "label": "Professional Evaluation",
+   "alt_labels": [],
+   "definition": "Information about professional evaluations",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:ProfessionalInterview",
+   "label": "Professional Interview",
+   "alt_labels": [],
+   "definition": "Information about professional interviews",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:Profile",
+   "label": "Profile",
+   "alt_labels": [],
+   "definition": "Profile or user profile is information and representation of characteristics associated with person(s) or group(s)",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:PublicLife",
+   "label": "Public Life",
+   "alt_labels": [],
+   "definition": "Information about public life",
+   "parents": [
+    "dpv-pd:Social"
+   ]
+  },
+  {
+   "id": "dpv-pd:PubliclyAvailableSocialMedia",
+   "label": "Publicly Available Social Media",
+   "alt_labels": [],
+   "definition": "Information about social media that is publicly available",
+   "parents": [
+    "dpv-pd:SocialMedia"
+   ]
+  },
+  {
+   "id": "dpv-pd:Purchase",
+   "label": "Purchase",
+   "alt_labels": [],
+   "definition": "Information about purchases such as items bought e.g. grocery or clothing",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:PurchasesAndSpendingHabit",
+   "label": "Purchases and Spending Habit",
+   "alt_labels": [],
+   "definition": "Information about analysis of purchases made and money spent expressed as a habit e.g. monthly shopping trends",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:Race",
+   "label": "Race",
+   "alt_labels": [],
+   "definition": "Information about race or racial history",
+   "parents": [
+    "dpv-pd:Ethnicity"
+   ]
+  },
+  {
+   "id": "dpv-pd:Reference",
+   "label": "Reference",
+   "alt_labels": [],
+   "definition": "Information about references in the professional context",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:Region",
+   "label": "Region",
+   "alt_labels": [],
+   "definition": "Information about region as a location",
+   "parents": [
+    "dpv-pd:PhysicalAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:Relationship",
+   "label": "Relationship",
+   "alt_labels": [],
+   "definition": "Information about relationships and relationship history",
+   "parents": [
+    "dpv-pd:Family"
+   ]
+  },
+  {
+   "id": "dpv-pd:Reliability",
+   "label": "Reliability",
+   "alt_labels": [],
+   "definition": "Information about reliability (e.g. of a person)",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:Religion",
+   "label": "Religion",
+   "alt_labels": [],
+   "definition": "Information about religion, religious inclinations, and religious history.",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:ReligiousBelief",
+   "label": "Religious Belief",
+   "alt_labels": [],
+   "definition": "Information about religion and religious beliefs",
+   "parents": [
+    "dpv-pd:KnowledgeBelief"
+   ]
+  },
+  {
+   "id": "dpv-pd:Residency",
+   "label": "Residency",
+   "alt_labels": [],
+   "definition": "Information about residency e.g. which region or country a person is resident in",
+   "parents": [
+    "dpv-pd:Location"
+   ]
+  },
+  {
+   "id": "dpv-pd:Retina",
+   "label": "Retina",
+   "alt_labels": [],
+   "definition": "Information about retina and the retinal patterns",
+   "parents": [
+    "dpv-pd:Biometric"
+   ]
+  },
+  {
+   "id": "dpv-pd:RoomNumber",
+   "label": "Room Number",
+   "alt_labels": [],
+   "definition": "Information about location expressed as room number or similar numbering systems",
+   "parents": [
+    "dpv-pd:PhysicalAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:Salary",
+   "label": "Salary",
+   "alt_labels": [],
+   "definition": "Information about salary",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:Sale",
+   "label": "Sale",
+   "alt_labels": [],
+   "definition": "Information about sales e.g. selling of goods or services",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:School",
+   "label": "School",
+   "alt_labels": [],
+   "definition": "Information about school such as name of school, conduct, or grades obtained",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:SecretText",
+   "label": "Secret Text",
+   "alt_labels": [],
+   "definition": "Information about secret text used in the process of authenticating the individual as an user accessing a system, e.g., when recovering a lost password",
+   "parents": [
+    "dpv-pd:Authenticating"
+   ]
+  },
+  {
+   "id": "dpv-pd:ServiceConsumptionBehaviour",
+   "label": "Service Consumption Behaviour",
+   "alt_labels": [],
+   "definition": "Information about the consumption of a service, e.g. time and duration of consumption",
+   "parents": [
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:Sexual",
+   "label": "Sexual",
+   "alt_labels": [],
+   "definition": "Information about sexuality and sexual history",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:SexualHistory",
+   "label": "Sexual History",
+   "alt_labels": [],
+   "definition": "Information about sexual history",
+   "parents": [
+    "dpv-pd:Sexual"
+   ]
+  },
+  {
+   "id": "dpv-pd:SexualPreference",
+   "label": "Sexual Preference",
+   "alt_labels": [],
+   "definition": "Information about sexual preferences",
+   "parents": [
+    "dpv-pd:Sexual"
+   ]
+  },
+  {
+   "id": "dpv-pd:Sibling",
+   "label": "Sibling",
+   "alt_labels": [],
+   "definition": "Information about sibling(s)",
+   "parents": [
+    "dpv-pd:FamilyStructure"
+   ]
+  },
+  {
+   "id": "dpv-pd:SkinTone",
+   "label": "Skin Tone",
+   "alt_labels": [],
+   "definition": "Information about skin tone",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:Social",
+   "label": "Social",
+   "alt_labels": [],
+   "definition": "Information about social aspects such as family, public life, or professional networks",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:SocialMedia",
+   "label": "Social Media",
+   "alt_labels": [],
+   "definition": "Information about social media",
+   "parents": [
+    "dpv-pd:Communication"
+   ]
+  },
+  {
+   "id": "dpv-pd:SocialMediaCommunication",
+   "label": "Social Media Communication",
+   "alt_labels": [],
+   "definition": "Information about social media communication, including the communication itself and metadata",
+   "parents": [
+    "dpv-pd:Communication"
+   ]
+  },
+  {
+   "id": "dpv-pd:SocialNetwork",
+   "label": "Social Network",
+   "alt_labels": [],
+   "definition": "Information about friends or connections expressed as a social network",
+   "parents": [
+    "dpv-pd:Social"
+   ]
+  },
+  {
+   "id": "dpv-pd:SocialStatus",
+   "label": "Social Status",
+   "alt_labels": [],
+   "definition": "Information about social status",
+   "parents": [
+    "dpv-pd:PublicLife"
+   ]
+  },
+  {
+   "id": "dpv-pd:Street",
+   "label": "Street",
+   "alt_labels": [],
+   "definition": "Information about street as a location",
+   "parents": [
+    "dpv-pd:PhysicalAddress"
+   ]
+  },
+  {
+   "id": "dpv-pd:TVViewingBehaviour",
+   "label": "TV Viewing Behaviour",
+   "alt_labels": [],
+   "definition": "Information about TV viewing behaviour, such as timestamps of channel change, duration of viewership, content consumed",
+   "parents": [
+    "dpv-pd:ServiceConsumptionBehaviour"
+   ]
+  },
+  {
+   "id": "dpv-pd:Tattoo",
+   "label": "Tattoo",
+   "alt_labels": [],
+   "definition": "Information about tattoos",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:Tax",
+   "label": "Tax",
+   "alt_labels": [],
+   "definition": "Information about financial tax e.g. tax records or tax due",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:TelephoneNumber",
+   "label": "Telephone Number",
+   "alt_labels": [],
+   "definition": "Information about telephone number",
+   "parents": [
+    "dpv-pd:Contact"
+   ]
+  },
+  {
+   "id": "dpv-pd:Thought",
+   "label": "Thought",
+   "alt_labels": [],
+   "definition": "Information about thoughts",
+   "parents": [
+    "dpv-pd:KnowledgeBelief"
+   ]
+  },
+  {
+   "id": "dpv-pd:Tracking",
+   "label": "Tracking",
+   "alt_labels": [],
+   "definition": "Information used to track an individual or group e.g. location or email",
+   "parents": []
+  },
+  {
+   "id": "dpv-pd:TradeUnionMembership",
+   "label": "Trade Union Membership",
+   "alt_labels": [],
+   "definition": "Information about trade union memberships and related topics",
+   "parents": [
+    "dpv-pd:GroupMembership"
+   ]
+  },
+  {
+   "id": "dpv-pd:Transaction",
+   "label": "Transaction",
+   "alt_labels": [],
+   "definition": "Information about financial transactions e.g. bank transfers",
+   "parents": [
+    "dpv-pd:Transactional"
+   ]
+  },
+  {
+   "id": "dpv-pd:Transactional",
+   "label": "Transactional",
+   "alt_labels": [],
+   "definition": "Information about a purchasing, spending or income",
+   "parents": [
+    "dpv-pd:Financial"
+   ]
+  },
+  {
+   "id": "dpv-pd:TravelHistory",
+   "label": "Travel History",
+   "alt_labels": [],
+   "definition": "Information about travel history",
+   "parents": [
+    "dpv-pd:Location"
+   ]
+  },
+  {
+   "id": "dpv-pd:UID",
+   "label": "UID",
+   "alt_labels": [],
+   "definition": "Information about unique identifiers",
+   "parents": [
+    "dpv-pd:Identifying"
+   ]
+  },
+  {
+   "id": "dpv-pd:UserAgent",
+   "label": "User agent",
+   "alt_labels": [],
+   "definition": "Information about software acting on behalf of users e.g. web browser",
+   "parents": [
+    "dpv-pd:Tracking"
+   ]
+  },
+  {
+   "id": "dpv-pd:Username",
+   "label": "Username",
+   "alt_labels": [],
+   "definition": "Information about usernames",
+   "parents": [
+    "dpv-pd:Identifying"
+   ]
+  },
+  {
+   "id": "dpv-pd:VehicalLicenseNumber",
+   "label": "Vehicle License Number",
+   "alt_labels": [],
+   "definition": "Information about vehicle license number",
+   "parents": [
+    "dpv-pd:VehicleLicense"
+   ]
+  },
+  {
+   "id": "dpv-pd:VehicalLicenseRegistration",
+   "label": "Vehicle License Registration",
+   "alt_labels": [],
+   "definition": "Information about vehicle license registration",
+   "parents": [
+    "dpv-pd:VehicleLicense"
+   ]
+  },
+  {
+   "id": "dpv-pd:Vehicle",
+   "label": "Vehicle",
+   "alt_labels": [],
+   "definition": "Information about vehicles",
+   "parents": [
+    "dpv-pd:External"
+   ]
+  },
+  {
+   "id": "dpv-pd:VehicleLicense",
+   "label": "Vehicle License",
+   "alt_labels": [],
+   "definition": "Information about vehicle license",
+   "parents": [
+    "dpv-pd:Identifying",
+    "dpv-pd:Vehicle"
+   ]
+  },
+  {
+   "id": "dpv-pd:VehicleUsage",
+   "label": "Vehicle Usage",
+   "alt_labels": [],
+   "definition": "Information about usage of vehicles, e.g. driving statistics",
+   "parents": [
+    "dpv-pd:Vehicle",
+    "dpv-pd:Behavioural"
+   ]
+  },
+  {
+   "id": "dpv-pd:VoiceCommunicationRecording",
+   "label": "Voice Communication Recording",
+   "alt_labels": [],
+   "definition": "Information about vocal recorded communication (e.g. telephony, VoIP)",
+   "parents": [
+    "dpv-pd:Communication"
+   ]
+  },
+  {
+   "id": "dpv-pd:VoiceMail",
+   "label": "Voice Mail",
+   "alt_labels": [],
+   "definition": "Information about voice mail messages",
+   "parents": [
+    "dpv-pd:Communication"
+   ]
+  },
+  {
+   "id": "dpv-pd:Weight",
+   "label": "Weight",
+   "alt_labels": [],
+   "definition": "Information about physical weight",
+   "parents": [
+    "dpv-pd:PhysicalCharacteristic"
+   ]
+  },
+  {
+   "id": "dpv-pd:WorkEnvironment",
+   "label": "Work Environment",
+   "alt_labels": [],
+   "definition": "Information about work environments",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv-pd:WorkHistory",
+   "label": "Work History",
+   "alt_labels": [],
+   "definition": "Information about work history in a professional context",
+   "parents": [
+    "dpv-pd:Professional"
+   ]
+  },
+  {
+   "id": "dpv:Adult",
+   "label": "Adult",
+   "alt_labels": [],
+   "definition": "A natural person that is not a child i.e. has attained some legally specified age of adulthood",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Applicant",
+   "label": "Applicant",
+   "alt_labels": [],
+   "definition": "Humans that are applicants in some context",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:AsylumSeeker",
+   "label": "Asylum Seeker",
+   "alt_labels": [],
+   "definition": "Humans that are asylum seekers",
+   "parents": [
+    "dpv:VulnerableHuman"
+   ]
+  },
+  {
+   "id": "dpv:Child",
+   "label": "Child",
+   "alt_labels": [],
+   "definition": "A 'child' is a natural legal person who is below a certain legal age depending on the legal jurisdiction.",
+   "parents": [
+    "dpv:VulnerableHuman"
+   ]
+  },
+  {
+   "id": "dpv:Citizen",
+   "label": "Citizen",
+   "alt_labels": [],
+   "definition": "Humans that are citizens (for a jurisdiction)",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Client",
+   "label": "Client",
+   "alt_labels": [],
+   "definition": "Humans that are clients or recipients of services",
+   "parents": [
+    "dpv:Customer"
+   ]
+  },
+  {
+   "id": "dpv:Consumer",
+   "label": "Consumer",
+   "alt_labels": [],
+   "definition": "Humans that consume goods or services for direct use",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Customer",
+   "label": "Customer",
+   "alt_labels": [],
+   "definition": "Humans that purchase goods or services",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:DataController",
+   "label": "Data Controller",
+   "alt_labels": [],
+   "definition": "The individual or organisation that decides (or controls) the purpose(s) of processing personal data.",
+   "parents": []
+  },
+  {
+   "id": "dpv:DataExporter",
+   "label": "Data Exporter",
+   "alt_labels": [],
+   "definition": "An entity that 'exports' data where exporting is considered a form of data transfer",
+   "parents": []
+  },
+  {
+   "id": "dpv:DataImporter",
+   "label": "Data Importer",
+   "alt_labels": [],
+   "definition": "An entity that 'imports' data where importing is considered a form of data transfer",
+   "parents": [
+    "dpv:Recipient"
+   ]
+  },
+  {
+   "id": "dpv:DataProcessor",
+   "label": "Data Processor",
+   "alt_labels": [],
+   "definition": "A ‘processor’ means a natural or legal person, public authority, agency or other body which processes data on behalf of the controller.",
+   "parents": [
+    "dpv:Recipient"
+   ]
+  },
+  {
+   "id": "dpv:DataProtectionOfficer",
+   "label": "Data Protection Officer",
+   "alt_labels": [],
+   "definition": "An entity within or authorised by an organisation to monitor internal compliance, inform and advise on data protection obligations and act as a contact point for data subjects and the supervisory authority.",
+   "parents": []
+  },
+  {
+   "id": "dpv:DataSubProcessor",
+   "label": "Data Sub-Processor",
+   "alt_labels": [],
+   "definition": "A 'sub-processor' is a processor engaged by another processor",
+   "parents": [
+    "dpv:DataProcessor"
+   ]
+  },
+  {
+   "id": "dpv:DataSubject",
+   "label": "Data Subject",
+   "alt_labels": [],
+   "definition": "The individual (or category of individuals) whose personal data is being processed",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:ElderlyDataSubject",
+   "label": "Elderly Data Subject",
+   "alt_labels": [],
+   "definition": "Data subjects that are considered elderly (i.e. based on age)",
+   "parents": [
+    "dpv:VulnerableDataSubject"
+   ]
+  },
+  {
+   "id": "dpv:ElderlyHuman",
+   "label": "Elderly Human",
+   "alt_labels": [],
+   "definition": "Humans that are considered elderly (i.e. based on age)",
+   "parents": [
+    "dpv:VulnerableHuman"
+   ]
+  },
+  {
+   "id": "dpv:Employee",
+   "label": "Employee",
+   "alt_labels": [],
+   "definition": "Humans that are employees",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:GuardianOfDataSubject",
+   "label": "Guardian(s) of Data Subject",
+   "alt_labels": [],
+   "definition": "Guardian(s) of data subjects such as children",
+   "parents": [
+    "dpv:GuardianOfHuman"
+   ]
+  },
+  {
+   "id": "dpv:GuardianOfHuman",
+   "label": "Guardian(s) of Human",
+   "alt_labels": [],
+   "definition": "Guardian(s) of humans",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:HumanSubject",
+   "label": "Human Subject",
+   "alt_labels": [],
+   "definition": "The individual (or category of individuals) that is the subject within some context such as personal data (dpv:DataSubject) or technology (tech:Subject)",
+   "parents": []
+  },
+  {
+   "id": "dpv:Immigrant",
+   "label": "Immigrant",
+   "alt_labels": [],
+   "definition": "Humans that are immigrants (for a jurisdiction)",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:JobApplicant",
+   "label": "Job Applicant",
+   "alt_labels": [],
+   "definition": "Humans that apply for jobs or employments",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:JointDataControllers",
+   "label": "Joint Data Controllers",
+   "alt_labels": [],
+   "definition": "A group of Data Controllers that jointly determine the purposes and means of processing",
+   "parents": [
+    "dpv:DataController"
+   ]
+  },
+  {
+   "id": "dpv:Member",
+   "label": "Member",
+   "alt_labels": [],
+   "definition": "Humans that are members of a group, organisation, or other collectives",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:MentallyVulnerableDataSubject",
+   "label": "Mentally Vulnerable Data Subject",
+   "alt_labels": [],
+   "definition": "Data subjects that are considered mentally vulnerable",
+   "parents": [
+    "dpv:VulnerableDataSubject",
+    "dpv:MentallyVulnerableHuman"
+   ]
+  },
+  {
+   "id": "dpv:MentallyVulnerableHuman",
+   "label": "Mentally Vulnerable Human",
+   "alt_labels": [],
+   "definition": "Humans that are considered mentally vulnerable within the context",
+   "parents": [
+    "dpv:VulnerableHuman"
+   ]
+  },
+  {
+   "id": "dpv:NonCitizen",
+   "label": "Non-Citizen",
+   "alt_labels": [],
+   "definition": "Humans that are not citizens (for a jurisdiction)",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:ParentOfDataSubject",
+   "label": "Parent(s) of Data Subject",
+   "alt_labels": [],
+   "definition": "Parent(s) of data subjects such as children",
+   "parents": [
+    "dpv:ParentOfHuman"
+   ]
+  },
+  {
+   "id": "dpv:ParentOfHuman",
+   "label": "Parent of Human",
+   "alt_labels": [],
+   "definition": "Parent(s) of humans",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Participant",
+   "label": "Participant",
+   "alt_labels": [],
+   "definition": "Humans that participate in some context such as volunteers in a function",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Patient",
+   "label": "Patient",
+   "alt_labels": [],
+   "definition": "Humans that receive medical attention, treatment, care, advice, or other health related services",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Recipient",
+   "label": "Recipient",
+   "alt_labels": [],
+   "definition": "Entities that receive data or technologies",
+   "parents": []
+  },
+  {
+   "id": "dpv:ServiceConsumer",
+   "label": "Service Consumer",
+   "alt_labels": [],
+   "definition": "The entity that consumes or receives the service",
+   "parents": []
+  },
+  {
+   "id": "dpv:ServiceProvider",
+   "label": "Service Provider",
+   "alt_labels": [],
+   "definition": "The entity that provides a service",
+   "parents": []
+  },
+  {
+   "id": "dpv:Student",
+   "label": "Student",
+   "alt_labels": [],
+   "definition": "Humans that are students",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Subscriber",
+   "label": "Subscriber",
+   "alt_labels": [],
+   "definition": "Humans that subscribe to service(s)",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:ThirdParty",
+   "label": "Third Party",
+   "alt_labels": [],
+   "definition": "A ‘third party’ means any natural or legal person other than - the entities directly involved or operating under those directly involved in a process",
+   "parents": []
+  },
+  {
+   "id": "dpv:Tourist",
+   "label": "Tourist",
+   "alt_labels": [],
+   "definition": "Humans that are tourists i.e. not citizens and not immigrants",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:User",
+   "label": "User",
+   "alt_labels": [],
+   "definition": "Humans that use service(s)",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:Visitor",
+   "label": "Visitor",
+   "alt_labels": [],
+   "definition": "Humans that are temporary visitors",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  },
+  {
+   "id": "dpv:VulnerableDataSubject",
+   "label": "Vulnerable Data Subject",
+   "alt_labels": [],
+   "definition": "Humans which should be considered 'vulnerable' and therefore would require additional measures and safeguards",
+   "parents": [
+    "dpv:VulnerableHuman"
+   ]
+  },
+  {
+   "id": "dpv:VulnerableHuman",
+   "label": "Vulnerable Human",
+   "alt_labels": [],
+   "definition": "Human(s) which should be considered 'vulnerable' within the context",
+   "parents": [
+    "dpv:HumanSubject"
+   ]
+  }
+ ]
+}

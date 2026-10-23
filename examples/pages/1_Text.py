@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from moose_ui.config import sidebar, validate_common
+from moose_ui.linker import linker_picker
 from moose_ui.metadata import clear_metadata_caches, fetch_schemas, schemas_supporting
 from moose_ui.samples import DEFAULT_TEXT_SAMPLE
 from moose_ui.submit import submit_and_render_job
@@ -34,9 +35,12 @@ if not schema_names:
     st.error("No text-capable schemas returned from API.")
     st.stop()
 
-# Prefer dpv_pd then dpv
-preferred = "dpv_pd" if "dpv_pd" in schema_names else ("dpv" if "dpv" in schema_names else schema_names[0])
+# Prefer the two-step privacy schema, then the older DPV ones
+preferred = next((name for name in ("dpv_privacy", "dpv_pd", "dpv") if name in schema_names), schema_names[0])
 schema = st.selectbox("Schema", schema_names, index=schema_names.index(preferred))
+schema_info = next((s for s in schemas if s.get("name") == schema), {})
+
+linker = linker_picker(schema_info, key="text_linker", item="mention")
 
 raw_text = st.text_area("Text (one sentence per line)", value=DEFAULT_TEXT_SAMPLE, height=160)
 
@@ -55,6 +59,8 @@ if st.button("Run NER", type="primary"):
     payload = {
         "text": text,
     }
+    if linker:
+        payload["linker"] = linker
 
     submit_and_render_job(
         cfg=cfg,

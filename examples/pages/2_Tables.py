@@ -6,6 +6,7 @@ from typing import Any
 import streamlit as st
 
 from moose_ui.config import sidebar, validate_common
+from moose_ui.linker import linker_picker
 from moose_ui.metadata import clear_metadata_caches, fetch_schemas, schemas_supporting
 from moose_ui.samples import DEFAULT_CPA_TABLE_SAMPLE, DEFAULT_TABLE_SAMPLE
 from moose_ui.submit import submit_and_render_job
@@ -92,11 +93,15 @@ if operation == "Column typing":
         st.stop()
 
     st.subheader("Column typing (one label per column)")
-    st.caption("Tip: STI is fast for structural patterns. DPV-PD is fast privacy typing. DPV is deep/slow.")
+    st.caption(
+        "Tip: dpv_privacy types personal-data columns with the System 1 model. STI is fast for structural "
+        "patterns. DPV is deep/slow."
+    )
 
-    # Recommend defaults: sti -> dpv_pd -> dpv -> first
-    recommended = "sti" if "sti" in table_schema_names else ("dpv_pd" if "dpv_pd" in table_schema_names else ("dpv" if "dpv" in table_schema_names else table_schema_names[0]))
+    recommended = next((n for n in ("dpv_privacy", "sti", "dpv_pd", "dpv") if n in table_schema_names), table_schema_names[0])
     schema = st.selectbox("Schema", table_schema_names, index=table_schema_names.index(recommended))
+    schema_info = next((s for s in schemas if s.get("name") == schema), {})
+    linker = linker_picker(schema_info, key="tables_linker", item="column")
 
     if st.button("Run column typing", type="primary"):
         if err:
@@ -110,6 +115,8 @@ if operation == "Column typing":
             "table_id": table_id,
             "sampled_rows": sampled_rows,
         }
+        if linker:
+            payload["linker"] = linker
 
         submit_and_render_job(
             cfg=cfg,
