@@ -113,9 +113,10 @@
     "candidate_k": 8,
     "linker": "auto",
     "linker_calibration": "dpv/subsets/privacy/laya_calibration.json",
-    "mention_guidance": "personal data about a person (for example names, contact details, identifiers, account, payment and financial data, health, age and other demographic data), or a person or organisation acting in a privacy role (data controller, data processor, recipient, third party).",
+    "mention_guidance": "personal data about a person (for example names, contact details, customer, account, ticket, case and reference identifiers, account, payment and financial data, health, age and other demographic data), or a person or organisation acting in a privacy role (data controller, data processor, recipient, third party).",
     "mention_rules": [
-      "Do not annotate words that only name a category without giving a value (e.g. \"your email address\"); annotate the value itself."
+      "Do not annotate words that only name a category without giving a value (e.g. \"your email address\"); annotate the value itself.",
+      "Keep a street address (house or flat number and street) as one span; annotate its postal code separately, and not the city or country on their own."
     ],
     "text_intro": "You are a DPV annotation engine.",
     "table_intro": "You are a DPV classification engine for tabular data.",

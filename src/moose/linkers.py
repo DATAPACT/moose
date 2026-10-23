@@ -58,11 +58,17 @@ def laya_available() -> bool:
 class Calibration:
     """How a schema's System 1 decisions are made (see research/dpv_eval/fit_system1.py)."""
 
-    # Hugging Face repo id or a local checkpoint folder (e.g. a fine-tuned Laya).
-    # MOOSE_LAYA_MODEL overrides it.
+    # Hugging Face repo id (a private one needs HF_TOKEN) or a local checkpoint folder.
     model: str = DEFAULT_LAYA_MODEL
+    # Environment variable that overrides `model` (e.g. a local folder); MOOSE_LAYA_MODEL by
+    # default. Fine-tuned models use their own, so they do not replace the base model elsewhere.
+    model_env: str = "MOOSE_LAYA_MODEL"
     # system1+llm: ask the LLM about items whose top probability is below this.
     consult_below: float = 0.6
+    # "top1": the chosen type's probability. "family": it plus its direct parents' and
+    # children's among the candidates, for models trained to spread probability over a type
+    # and its finer children (see research/dpv_eval, fine-tuned Laya).
+    confidence: str = "top1"
     # Tasks on which Laya's probabilities were checked against labelled data; elsewhere
     # they are reported as not calibrated.
     validated_for: tuple[str, ...] = ("text",)
@@ -73,12 +79,21 @@ class Calibration:
         if path is None or not path.exists():
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
-        known = {k: data[k] for k in ("model", "consult_below", "validated_for", "fitted_on") if k in data}
+        fields = ("model", "model_env", "consult_below", "confidence", "validated_for", "fitted_on")
+        known = {k: data[k] for k in fields if k in data}
         if "validated_for" in known:
             known["validated_for"] = tuple(known["validated_for"])
-        if os.getenv("MOOSE_LAYA_MODEL"):
-            known["model"] = os.environ["MOOSE_LAYA_MODEL"]
+        override = os.getenv(known.get("model_env", "MOOSE_LAYA_MODEL"))
+        if override:
+            known["model"] = override
         return cls(**known)
+
+    def confidence_of(self, probabilities: dict[str, float], chosen: str, candidates: list[dict[str, Any]]) -> float:
+        if self.confidence != "family":
+            return probabilities[chosen]
+        parents = {c["id"]: set(c.get("parents") or []) for c in candidates}
+        related = {c for c in parents if c != chosen and (c in parents.get(chosen, set()) or chosen in parents[c])}
+        return min(1.0, probabilities[chosen] + sum(probabilities.get(c, 0.0) for c in related))
 
 
 def system1_ready(calibration: Calibration | None) -> bool:
@@ -253,8 +268,9 @@ async def decide(
         to_llm = []
         for i, probabilities in enumerate(plain):
             best = max(probabilities, key=probabilities.get)
-            decisions[i] = Decision(best, probabilities[best], "system1", validated, probabilities)
-            if linker == "system1+llm" and probabilities[best] < calibration.consult_below:
+            confidence = calibration.confidence_of(probabilities, best, items[i]["candidates"])
+            decisions[i] = Decision(best, confidence, "system1", validated, probabilities)
+            if linker == "system1+llm" and confidence < calibration.consult_below:
                 to_llm.append(i)
     if not to_llm:
         return decisions  # type: ignore[return-value]
@@ -281,7 +297,8 @@ async def decide(
     for i, (choice, stated) in choices.items():
         if i in hinted:  # system1+llm: Laya decides again, with the LLM's suggestion
             best = max(hinted[i], key=hinted[i].get)
-            decisions[i] = Decision(best, hinted[i][best], "system1+llm", validated, hinted[i], labels[i])
+            confidence = calibration.confidence_of(hinted[i], best, items[i]["candidates"])
+            decisions[i] = Decision(best, confidence, "system1+llm", validated, hinted[i], labels[i])
         elif choice == "none":
             # Laya was unsure and the LLM found no candidate that fits: leave the item out.
             decisions[i] = Decision("none", 0.0, "system1+llm", False)

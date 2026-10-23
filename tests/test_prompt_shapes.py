@@ -148,3 +148,8 @@ def test_small_one_step_prompts_define_their_types_and_large_ones_do_not() -> No
     dpv = get_schema_config("dpv")
     large = build_text_ner_prompt(dpv, [{"task_id": "t", "text": "x"}], dpv.load_type_ids())
     assert "TYPE DEFINITIONS" not in large
+
+
+def test_one_step_prompts_have_the_value_span_rules() -> None:
+    prompt = build_text_ner_prompt(get_schema_config("coarse"), [{"task_id": "t", "text": "x"}], ["PERSON"])
+    assert 'without cue words or field names before it' in prompt and "named entities only" in prompt

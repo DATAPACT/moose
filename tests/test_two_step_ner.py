@@ -378,3 +378,33 @@ def test_dpv_annotates_in_two_steps_with_the_llm_deciding() -> None:
     # Laya chooses badly among DPV's 8,000+ concepts zero-shot (DPVCallBench dev: 0.55 against
     # 0.77 for the LLM), but two steps beat one step even with the LLM deciding.
     assert (dpv.candidate_mode, dpv.linker) == ("two_step", "llm") and two_step_active(dpv)
+
+
+def test_family_confidence_adds_direct_parents_and_children() -> None:
+    from moose.linkers import Calibration
+
+    candidates = [
+        {"id": "dpv-pd:MedicalHealth", "parents": []},
+        {"id": "dpv-pd:Health", "parents": ["dpv-pd:MedicalHealth"]},
+        {"id": "dpv-pd:HealthHistory", "parents": ["dpv-pd:Health"]},
+        {"id": "dpv-pd:Name", "parents": []},
+    ]
+    probabilities = {"dpv-pd:Health": 0.5, "dpv-pd:MedicalHealth": 0.2, "dpv-pd:HealthHistory": 0.2, "dpv-pd:Name": 0.1}
+    family = Calibration(confidence="family").confidence_of(probabilities, "dpv-pd:Health", candidates)
+    assert family == pytest.approx(0.9)  # Health + its parent + its child, not the unrelated Name
+    assert Calibration().confidence_of(probabilities, "dpv-pd:Health", candidates) == 0.5
+
+
+def test_a_calibration_can_name_its_own_model_override(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from moose.linkers import Calibration
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps({"model": "org/fine-tuned", "model_env": "MOOSE_LAYA_DPV_MODEL", "confidence": "family"}))
+    monkeypatch.setenv("MOOSE_LAYA_MODEL", "/base")
+    assert Calibration.load(path).model == "org/fine-tuned"  # the general override does not apply
+    monkeypatch.setenv("MOOSE_LAYA_DPV_MODEL", "/local/fine-tuned")
+    fine_tuned = Calibration.load(path)
+    assert (fine_tuned.model, fine_tuned.confidence) == ("/local/fine-tuned", "family")
+    # Schemas without their own variable follow MOOSE_LAYA_MODEL, and keep top-1 confidence.
+    privacy = Calibration.load(get_schema_config("dpv_privacy").linker_calibration)
+    assert (privacy.model, privacy.confidence) == ("/base", "top1")
