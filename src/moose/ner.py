@@ -467,10 +467,9 @@ async def _system1_probabilities(
     scores = await scorer.score(context, items, labels, prompt=prompt)
     out = []
     for choice, item, probabilities in zip(choices, items, scores):
-        raw = calibration.confidence_of(probabilities, choice["type_id"], item["candidates"])
-        probability, calibrated = calibration.probability("one_step", raw, task)
-        out.append({"confidence": round(probability, 4), "calibrated": calibrated, "decided_by": "llm",
-                    "ranking": ranked(probabilities)})
+        calibrated = task in calibration.validated_tasks("one_step")
+        out.append({"confidence": round(probabilities[choice["type_id"]], 4), "calibrated": calibrated, "decided_by": "llm",
+                    "ranking": ranked(probabilities, choice["type_id"])})
     return out
 
 
@@ -523,7 +522,7 @@ def _decision_fields(decision: Decision, item: dict[str, Any], schema: SchemaCon
     if decision.llm_suggestion:
         fields["llm_suggestion"] = decision.llm_suggestion
     if decision.probabilities:
-        fields["ranking"] = ranked(decision.probabilities)
+        fields["ranking"] = ranked(decision.probabilities, decision.type_id)
     if schema.coarse_mapping:
         fields["coarse_type_id"] = schema.coarse_mapping.get(decision.type_id)
     return fields

@@ -61,8 +61,8 @@ def decision_fields(item: dict[str, Any]) -> dict[str, Any]:
 
 def decision_caption() -> None:
     st.caption(
-        "confidence: the probability that the type is right, always from the System 1 model (Laya), never from "
-        "the LLM, which tends to be over-confident. calibrated = true where that probability was checked against "
+        "confidence: Laya's probability of the chosen type, as in ranking; never the LLM's, which tends to be "
+        "over-confident. calibrated = true where that linker's probabilities were checked against "
         "labelled data; empty when Laya is not available on the server. decided_by: system1 (Laya alone), "
         "system1+llm (Laya after the LLM's suggestion, shown in llm_suggestion) or llm (the LLM chose; Laya "
         "scored its choice). category: how the LLM described it. ranking: Laya's top candidates."

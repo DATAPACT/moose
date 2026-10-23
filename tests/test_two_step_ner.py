@@ -195,7 +195,7 @@ async def test_llm_linker_takes_its_probability_from_laya_not_the_llm(monkeypatc
     _use_laya(monkeypatch, tmp_path, fake)
     llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.99}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
-    # The LLM's 0.99 is ignored; Laya scores the LLM's choice. No calibrator for llm: not calibrated.
+    # The LLM's 0.99 is ignored; Laya scores the LLM's choice. Never checked for llm: not calibrated.
     assert (entity["decided_by"], entity["confidence"], entity["calibrated"]) == ("llm", 0.7, False)
     assert fake.calls == [("Luca Bianchi", "Name")] and '"confidence"' not in llm.prompts[1]
 
@@ -380,58 +380,31 @@ def test_dpv_annotates_in_two_steps_with_the_llm_deciding() -> None:
     assert (dpv.candidate_mode, dpv.linker) == ("two_step", "llm") and two_step_active(dpv)
 
 
-def test_family_confidence_adds_direct_parents_and_children() -> None:
-    from moose.linkers import Calibration
-
-    candidates = [
-        {"id": "dpv-pd:MedicalHealth", "parents": []},
-        {"id": "dpv-pd:Health", "parents": ["dpv-pd:MedicalHealth"]},
-        {"id": "dpv-pd:HealthHistory", "parents": ["dpv-pd:Health"]},
-        {"id": "dpv-pd:Name", "parents": []},
-    ]
-    probabilities = {"dpv-pd:Health": 0.5, "dpv-pd:MedicalHealth": 0.2, "dpv-pd:HealthHistory": 0.2, "dpv-pd:Name": 0.1}
-    family = Calibration(confidence="family").confidence_of(probabilities, "dpv-pd:Health", candidates)
-    assert family == pytest.approx(0.9)  # Health + its parent + its child, not the unrelated Name
-    assert Calibration().confidence_of(probabilities, "dpv-pd:Health", candidates) == 0.5
-
-
 def test_a_calibration_can_name_its_own_model_override(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     from moose.linkers import Calibration
 
     path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"model": "org/fine-tuned", "model_env": "MOOSE_LAYA_DPV_MODEL", "confidence": "family"}))
+    path.write_text(json.dumps({"model": "org/fine-tuned", "model_env": "MOOSE_LAYA_DPV_MODEL"}))
     monkeypatch.setenv("MOOSE_LAYA_MODEL", "/base")
     assert Calibration.load(path).model == "org/fine-tuned"  # the general override does not apply
     monkeypatch.setenv("MOOSE_LAYA_DPV_MODEL", "/local/fine-tuned")
-    fine_tuned = Calibration.load(path)
-    assert (fine_tuned.model, fine_tuned.confidence) == ("/local/fine-tuned", "family")
-    # Schemas without their own variable follow MOOSE_LAYA_MODEL, and keep top-1 confidence.
-    privacy = Calibration.load(get_schema_config("dpv_privacy").linker_calibration)
-    assert (privacy.model, privacy.confidence) == ("/base", "top1")
+    assert Calibration.load(path).model == "/local/fine-tuned"
+    # Schemas without their own variable follow MOOSE_LAYA_MODEL.
+    assert Calibration.load(get_schema_config("dpv_privacy").linker_calibration).model == "/base"
 
 
-def test_an_unknown_confidence_mode_is_rejected(tmp_path) -> None:
-    from moose.linkers import Calibration
-
-    path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"confidence": "families"}))
-    with pytest.raises(ValueError, match="confidence must be one of top1, family"):
-        Calibration.load(path)
-
-
-
-def test_a_calibrator_maps_laya_probabilities_per_linker(tmp_path) -> None:
-    from moose.linkers import Calibration
-
-    path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"validated_for": ["text"], "calibrators": {
-        "llm": {"points": [[0.0, 0.5], [0.5, 0.8], [1.0, 0.95]], "validated_for": ["text"]},
-    }}))
-    cal = Calibration.load(path)
-    assert cal.probability("llm", 0.25, "text") == (pytest.approx(0.65), True)
-    assert cal.probability("llm", 0.25, "table") == (pytest.approx(0.65), False)
-    # No calibrator for system1: Laya's raw probability, validated where the file says so.
-    assert cal.probability("system1", 0.4, "text") == (0.4, True)
+@pytest.mark.asyncio
+async def test_confidence_is_laya_ranking_probability_of_the_choice(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    # The LLM picks Laya's fourth type: its probability is reported unchanged, and it joins the ranking.
+    found = [c["id"] for c in candidate_index(get_schema_config("dpv_privacy")).top_k("person name Luca Bianchi", 8)]
+    others = [c for c in found if c != "dpv-pd:Name"][:3]
+    hinted = {others[0]: 0.4, others[1]: 0.3, others[2]: 0.2, "dpv-pd:Name": 0.1}
+    fake = _FakeLaya(plain={}, hinted={"Luca Bianchi": hinted})
+    _use_laya(monkeypatch, tmp_path, fake)
+    llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name"}]})
+    [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
+    assert (entity["type_id"], entity["confidence"]) == ("dpv-pd:Name", 0.1)
+    assert {"type_id": "dpv-pd:Name", "probability": 0.1} in entity["ranking"] and len(entity["ranking"]) == 4
 
 
 @pytest.mark.asyncio
@@ -456,11 +429,10 @@ def test_only_checked_linkers_count_as_calibrated(tmp_path) -> None:
     from moose.linkers import Calibration
 
     path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"validated_for": ["text"], "calibrators": {
-        "system1": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": ["text"]},
-        "llm": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": []},
+    path.write_text(json.dumps({"validated_for": ["text"], "linkers": {
+        "system1": {"validated_for": ["text", "table"]}, "llm": {"validated_for": []},
     }}))
     cal = Calibration.load(path)
-    assert cal.validated_tasks("system1") == ("text",) and cal.validated_tasks("llm") == ()
-    assert cal.validated_tasks("system1+llm") == ("text",)  # raw Laya, covered by the file's validated_for
-    assert cal.probability("one_step", 0.8, "text") == (0.8, False)  # never checked: not calibrated
+    assert cal.validated_tasks("system1") == ("text", "table") and cal.validated_tasks("llm") == ()
+    assert cal.validated_tasks("system1+llm") == ("text",)  # Laya's own linker: the file's validated_for
+    assert cal.validated_tasks("one_step") == ()  # never checked: not calibrated

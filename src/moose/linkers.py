@@ -11,9 +11,10 @@ adds what it knows. Three linkers:
   llm          the LLM decides; Laya gives the probability of the LLM's choice.
 
 The LLM never states a probability: LLMs are over-confident (on DPVCallBench, a stated
-0.97 for 77% right). Every probability is Laya's, mapped through the schema's calibrator
-for that linker where one was fitted on labelled data, and marked calibrated only where
-that was checked. Without Laya (the plain library), decisions carry no probability.
+0.97 for 77% right). Every probability is Laya's: the chosen type's probability in Laya's
+ranking, unchanged. It is marked calibrated only where the schema's calibration file says
+that linker's probabilities were checked against labelled data. Without Laya (the plain
+library), decisions carry no probability.
 
 On DPVCallBench (two-step `dpv_privacy`), system1+llm with consult_below 0.6 matched or
 beat both Laya and the LLM alone and halved the calibration error, asking the LLM about
@@ -35,7 +36,6 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 LINKERS = ("system1+llm", "system1", "llm")
-CONFIDENCE_MODES = ("top1", "family")
 SYSTEM1_LINKERS = ("system1+llm", "system1")
 DEFAULT_LAYA_MODEL = "convaiinnovations/laya"
 # Characters of each candidate's definition shown to Laya: definitions help it a lot,
@@ -59,25 +59,6 @@ def laya_available() -> bool:
 
 
 @dataclass(frozen=True)
-class Calibrator:
-    """Maps Laya's raw probability to the accuracy observed on labelled data (isotonic
-    regression, stored as increasing [raw, calibrated] points, linearly interpolated)."""
-
-    points: tuple[tuple[float, float], ...]
-    validated_for: tuple[str, ...] = ()
-    fitted_on: str | None = None
-
-    def __call__(self, raw: float) -> float:
-        points = self.points
-        if raw <= points[0][0]:
-            return points[0][1]
-        for (x0, y0), (x1, y1) in zip(points, points[1:]):
-            if raw <= x1:
-                return y0 if x1 == x0 else y0 + (y1 - y0) * (raw - x0) / (x1 - x0)
-        return points[-1][1]
-
-
-@dataclass(frozen=True)
 class Calibration:
     """How a schema's System 1 decisions are made (see research/dpv_eval/fit_system1.py)."""
 
@@ -88,15 +69,12 @@ class Calibration:
     model_env: str = "MOOSE_LAYA_MODEL"
     # system1+llm: ask the LLM about items whose top probability is below this.
     consult_below: float = 0.6
-    # "top1": the chosen type's probability. "family": it plus its direct parents' and
-    # children's among the candidates, for models trained to spread probability over a type
-    # and its finer children (see research/dpv_eval, fine-tuned Laya).
-    confidence: str = "top1"
-    # Tasks on which Laya's raw probabilities were checked against labelled data (used when
-    # the linker has no calibrator; never for the llm linker).
+    # Tasks on which Laya's probabilities were checked against labelled data (used for
+    # Laya's own linkers when the file has no entry for the linker; never for llm).
     validated_for: tuple[str, ...] = ("text",)
-    # Per linker: a calibrator fitted on labelled data (see research/dpv_eval/fit_calibrators.py).
-    calibrators: tuple[tuple[str, Calibrator], ...] = ()
+    # Per linker: the tasks on which its probabilities were checked (see
+    # research/dpv_eval/check_calibration.py).
+    linkers: tuple[tuple[str, tuple[str, ...]], ...] = ()
     fitted_on: str | None = None
 
     @classmethod
@@ -104,20 +82,13 @@ class Calibration:
         if path is None or not path.exists():
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
-        fields = ("model", "model_env", "consult_below", "confidence", "validated_for", "fitted_on")
+        fields = ("model", "model_env", "consult_below", "validated_for", "fitted_on")
         known: dict[str, Any] = {k: data[k] for k in fields if k in data}
         if "validated_for" in known:
             known["validated_for"] = tuple(known["validated_for"])
-        known["calibrators"] = tuple(
-            (linker, Calibrator(
-                points=tuple((float(x), float(y)) for x, y in entry["points"]),
-                validated_for=tuple(entry.get("validated_for") or ()),
-                fitted_on=entry.get("fitted_on"),
-            ))
-            for linker, entry in (data.get("calibrators") or {}).items()
+        known["linkers"] = tuple(
+            (linker, tuple(entry.get("validated_for") or ())) for linker, entry in (data.get("linkers") or {}).items()
         )
-        if known.get("confidence", "top1") not in CONFIDENCE_MODES:
-            raise ValueError(f"{path}: confidence must be one of {', '.join(CONFIDENCE_MODES)}.")
         override = os.getenv(known.get("model_env", "MOOSE_LAYA_MODEL"))
         if override:
             known["model"] = override
@@ -125,24 +96,11 @@ class Calibration:
 
     def validated_tasks(self, linker: str) -> tuple[str, ...]:
         """Tasks on which this linker's probabilities were checked against labelled data: its
-        calibrator's, or the file's validated_for for Laya's own raw decisions only."""
-        calibrator = dict(self.calibrators).get(linker)
-        if calibrator is not None:
-            return calibrator.validated_for
+        own entry, or the file's validated_for for Laya's own linkers only."""
+        checked = dict(self.linkers)
+        if linker in checked:
+            return checked[linker]
         return self.validated_for if linker in SYSTEM1_LINKERS else ()
-
-    def probability(self, linker: str, raw: float, task: str) -> tuple[float, bool]:
-        """The probability to report for a decision, and whether it counts as calibrated."""
-        calibrator = dict(self.calibrators).get(linker)
-        probability = calibrator(raw) if calibrator is not None else raw
-        return probability, task in self.validated_tasks(linker)
-
-    def confidence_of(self, probabilities: dict[str, float], chosen: str, candidates: list[dict[str, Any]]) -> float:
-        if self.confidence != "family":
-            return probabilities[chosen]
-        parents = {c["id"]: set(c.get("parents") or []) for c in candidates}
-        related = {c for c in parents if c != chosen and (c in parents.get(chosen, set()) or chosen in parents[c])}
-        return min(1.0, probabilities[chosen] + sum(probabilities.get(c, 0.0) for c in related))
 
 
 def system1_ready(calibration: Calibration | None) -> bool:
@@ -273,8 +231,12 @@ async def get_scorer(model: str) -> LayaScorer:
     return await asyncio.to_thread(laya_scorer, model)
 
 
-def ranked(probabilities: dict[str, float], top: int = 3) -> list[dict[str, Any]]:
+def ranked(probabilities: dict[str, float], chosen: str | None = None, top: int = 3) -> list[dict[str, Any]]:
+    """Laya's top types, plus the chosen one if it is not among them (the LLM's choice can
+    rank lower), so the reported confidence is always in the ranking."""
     best = sorted(probabilities.items(), key=lambda item: -item[1])[:top]
+    if chosen in probabilities and chosen not in dict(best):
+        best.append((chosen, probabilities[chosen]))
     return [{"type_id": type_id, "probability": round(p, 4)} for type_id, p in best]
 
 
@@ -310,9 +272,8 @@ async def decide(
         raise LinkerUnavailable(failure or "This linker needs Laya and the schema's calibration; use the llm linker.")
 
     def decision(chosen: str, probabilities: dict[str, float], decided_by: str, i: int, suggestion: str | None = None) -> Decision:
-        raw = calibration.confidence_of(probabilities, chosen, items[i]["candidates"])
-        probability, calibrated = calibration.probability(linker, raw, task)
-        return Decision(chosen, probability, decided_by, calibrated, probabilities, suggestion)
+        calibrated = task in calibration.validated_tasks(linker)
+        return Decision(chosen, probabilities[chosen], decided_by, calibrated, probabilities, suggestion)
 
     decisions: list[Decision | None] = [None] * len(items)
     to_llm = list(range(len(items)))
@@ -323,7 +284,7 @@ async def decide(
         for i, probabilities in enumerate(plain):
             best = max(probabilities, key=probabilities.get)
             decisions[i] = decision(best, probabilities, "system1", i)
-            if linker == "system1+llm" and calibration.confidence_of(probabilities, best, items[i]["candidates"]) < calibration.consult_below:
+            if linker == "system1+llm" and probabilities[best] < calibration.consult_below:
                 to_llm.append(i)
     if not to_llm:
         return decisions  # type: ignore[return-value]
