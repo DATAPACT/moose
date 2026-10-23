@@ -115,6 +115,15 @@ TYPE_SELECT_INTRO = "You are a type inventory selector for semantic typing."
 
 # Speaker labels in transcripts ("Agent:", "Customer:") say who talks; they are not mentions.
 SPEAKER_LABEL_RULE = 'Do not annotate speaker labels that only mark who is talking (e.g. "Agent:", "Customer:").'
+# Span boundaries, shared by the one-step and the two-step prompts.
+VALUE_SPAN_RULES = (
+    'The span is the value itself, without cue words or field names before it (e.g. "USR 661 204", not "Customer ID USR 661 204").',
+    'Do not include trailing unit words that are not part of the value (e.g. "seventy two", not "seventy two years old").',
+    "Split a value into separate spans when its parts are different kinds of data (e.g. a street address and its postal code).",
+    'Keep qualifiers that are part of a value or range (e.g. "over 65", "under 18").',
+    'Keep a value spoken in parts as one span (e.g. "month nine, year twenty eight" for an expiry date).',
+    'Leave out leading articles and possessives unless they are part of a name (e.g. "courier", not "the courier"; but "The Hague").',
+)
 # Up to this many types, the one-step prompt also gives each type's definition; beyond it
 # the list of ids alone is already long (dpv has 9,000+).
 MAX_DEFINED_TYPES = 60
@@ -280,8 +289,11 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
             "- Prefer the most specific and complete mention span.",
             "- Do NOT output duplicate entities with identical (start,end).",
             "- Avoid overlaps. Only allow overlapping spans if both are necessary and semantically distinct.",
-            "- Do not annotate generic words unless they explicitly indicate relevant concepts from allowed type_ids.",
+            "- Do not annotate generic words unless they explicitly indicate relevant concepts from allowed type_ids"
+            + (" (the schema's rules at the end of this list take precedence)." if schema.mention_rules else "."),
+            *[f"- {rule}" for rule in VALUE_SPAN_RULES],
             f"- {SPEAKER_LABEL_RULE}",
+            *[f"- {rule}" for rule in (schema.mention_rules or ())],
             '- If no entities exist, return: "entities": [].',
             "",
             "SCORING RULES",
@@ -488,9 +500,7 @@ def build_mention_prompt(schema: SchemaConfig, text: str) -> str:
         'for example "customer identifier", "medical condition" or "company receiving the data".',
         "",
         "SPAN RULES",
-        '- The span is the value itself, without cue words or field names before it (e.g. "USR 661 204", not "Customer ID USR 661 204").',
-        "- Do not include trailing unit words that are not part of the value (e.g. \"seventy two\", not \"seventy two years old\").",
-        "- Split a value into separate spans when its parts are different kinds of data (e.g. a street address and its postal code).",
+        *[f"- {rule}" for rule in VALUE_SPAN_RULES],
         "- Spans must not overlap.",
         f"- {SPEAKER_LABEL_RULE}",
         *[f"- {rule}" for rule in (schema.mention_rules or DEFAULT_MENTION_RULES)],
