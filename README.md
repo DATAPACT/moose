@@ -318,7 +318,7 @@ A request can choose who decides with `"linker"`:
 |---|---|---|
 | `system1+llm` (default with Laya) | Laya, consulting the LLM when unsure | 1, plus 1 when any item is unsure |
 | `system1` | Laya alone | 1 |
-| `llm` (default without Laya, and for `dpv`) | The LLM; Laya's probability of its choice, not calibrated | 2 |
+| `llm` (default without Laya, and for `dpv`) | The LLM, with its own stated confidence (not calibrated); Laya is not used | 2 |
 
 Each entity or column reports:
 - `confidence`;

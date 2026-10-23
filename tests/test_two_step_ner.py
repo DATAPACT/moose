@@ -189,13 +189,15 @@ async def test_system1_consults_the_llm_only_when_unsure_and_decides_again(monke
 
 
 @pytest.mark.asyncio
-async def test_llm_linker_reports_laya_probability_of_the_llm_choice(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    fake = _FakeLaya(plain={}, hinted={"Luca Bianchi": {"dpv-pd:Name": 0.85}})
+async def test_llm_linker_does_not_run_laya(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    fake = _FakeLaya(plain={}, hinted={})
     _use_laya(monkeypatch, tmp_path, fake)
     llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.99}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
-    # Laya's probability of the LLM's choice is reported, but not as calibrated (it was too low on DPVCallBench).
-    assert (entity["decided_by"], entity["calibrated"], entity["confidence"]) == ("llm", False, 0.85)
+    # The LLM's stated confidence, not calibrated; Laya's probability for the LLM's choice was
+    # too poorly calibrated on DPVCallBench to be worth computing.
+    assert (entity["decided_by"], entity["calibrated"], entity["confidence"]) == ("llm", False, 0.99)
+    assert fake.calls == [] and "ranking" not in entity
 
 
 @pytest.mark.asyncio
