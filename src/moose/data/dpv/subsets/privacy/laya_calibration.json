@@ -20,7 +20,7 @@
     },
     "llm": {
       "validated_for": [],
-      "checked_on": "DPVCallBench v0.1 train+dev+test (1395 mentions with exact gold spans): accuracy 0.842, ECE 0.213. research/dpv_eval/check_calibration.py"
+      "checked_on": "DPVCallBench v0.1 train+dev+test (1395 mentions with exact gold spans): accuracy 0.842, ECE 0.133. research/dpv_eval/check_calibration.py"
     }
   }
 }

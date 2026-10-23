@@ -444,8 +444,8 @@ def _choices_to_scores(raw_text: str, type_ids: list[str], dense: bool) -> str:
 async def _system1_probabilities(
     schema: SchemaConfig, context: str, choices: list[dict[str, Any]], prompt, task: str
 ) -> list[dict[str, Any]]:
-    """For types an LLM chose in one step: the System 1 model's probability of each choice,
-    scored among the chosen type and a few retrieved neighbours, given the LLM's choice.
+    """For types an LLM chose in one step: the System 1 model's yes/no probability that each
+    choice is right, and its own ranking of the chosen type and a few retrieved neighbours.
     No probability (None) when the System 1 model is not available."""
     unavailable = {"confidence": None, "calibrated": False, "decided_by": "llm"}
     calibration = Calibration.load(schema.linker_calibration)
@@ -457,18 +457,19 @@ async def _system1_probabilities(
         return [dict(unavailable) for _ in choices]
     index = candidate_index(schema)
     by_id = {r["id"]: r for r in index.records}
-    items, labels = [], []
+    items, chosen_records = [], []
     for choice in choices:
         chosen = by_id.get(choice["type_id"]) or {"id": choice["type_id"], "label": choice["type_id"], "parents": []}
         label = chosen.get("label") or chosen["id"]
         neighbours = [r for r in index.top_k(f"{label} {choice['text']}", schema.candidate_k) if r["id"] != chosen["id"]]
         items.append({"text": choice["text"], "candidates": [chosen, *neighbours]})
-        labels.append(label)
-    scores = await scorer.score(context, items, labels, prompt=prompt)
+        chosen_records.append(chosen)
+    scores = await scorer.score(context, items, prompt=prompt)
+    verdicts = await scorer.verify(context, items, chosen_records, prompt=prompt)
     out = []
-    for choice, item, probabilities in zip(choices, items, scores):
-        calibrated = task in calibration.validated_tasks("one_step")
-        out.append({"confidence": round(probabilities[choice["type_id"]], 4), "calibrated": calibrated, "decided_by": "llm",
+    calibrated = task in calibration.validated_tasks("one_step")
+    for choice, probabilities, yes in zip(choices, scores, verdicts):
+        out.append({"confidence": round(yes, 4), "calibrated": calibrated, "decided_by": "llm",
                     "ranking": ranked(probabilities, choice["type_id"])})
     return out
 

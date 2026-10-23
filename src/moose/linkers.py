@@ -8,11 +8,13 @@ adds what it knows. Three linkers:
                calibration's `consult_below`) go to the LLM, whose suggestion is added to
                Laya's input; Laya then decides again. The final probability is Laya's.
   system1      Laya alone; no LLM call for this step.
-  llm          the LLM decides; Laya gives the probability of the LLM's choice.
+  llm          the LLM decides; Laya, asked a plain yes/no question about that type (not
+               told it came from an LLM), gives the probability that it is right.
 
 The LLM never states a probability: LLMs are over-confident (on DPVCallBench, a stated
-0.97 for 77% right). Every probability is Laya's: the chosen type's probability in Laya's
-ranking, unchanged. It is marked calibrated only where the schema's calibration file says
+0.97 for 77% right). Every probability is Laya's: for its own decisions, the chosen type's
+probability in Laya's ranking, unchanged; for the LLM's, Laya's P(yes) that the item is
+that type. It is marked calibrated only where the schema's calibration file says
 that linker's probabilities were checked against labelled data. Without Laya (the plain
 library), decisions carry no probability.
 
@@ -122,6 +124,8 @@ class Prompt:
     context_label: str = "Call transcript"
     item_label: str = "Mention"
     instructions: str = "Which category of personal data or privacy role is the mention?"
+    # The yes/no question for one type, chosen by the LLM.
+    verify_question: str = "Is the mention {label}?"
 
 
 TEXT_PROMPT = Prompt()
@@ -129,6 +133,7 @@ TABLE_PROMPT = Prompt(
     context_label="Table columns",
     item_label="Column and sample values",
     instructions="Which category of personal data or privacy role do the column's values hold?",
+    verify_question="Do the column's values hold {label}?",
 )
 
 
@@ -148,6 +153,16 @@ def laya_inputs(
         definition = _short(record.get("definition"))
         criteria[f"option_{i}"] = f"{record.get('label') or record['id']}" + (f": {definition}" if definition else "")
     return state, {"category": {"type": "choice", "instructions": prompt.instructions, "criteria": criteria}}
+
+
+def laya_verify_inputs(context: str, item: dict[str, Any], record: dict[str, Any], prompt: Prompt = TEXT_PROMPT) -> tuple[str, dict[str, Any]]:
+    """Laya's state and yes/no question for one type: the item alone, with no other
+    candidates and nothing about who proposed the type, so Laya judges it on its own."""
+    state = f'{prompt.context_label}: "{context}"\n{prompt.item_label}: "{item["text"]}"'
+    label = record.get("label") or record["id"]
+    definition = _short(record.get("definition"))
+    criteria = {"yes": f"Yes, it is {label}" + (f": {definition}" if definition else ""), "no": f"No, it is not {label}"}
+    return state, {"verdict": {"type": "choice", "instructions": prompt.verify_question.format(label=label), "criteria": criteria}}
 
 
 class LayaScorer:
@@ -172,6 +187,20 @@ class LayaScorer:
                 ids = [c["id"] for c in item["candidates"]]
                 out.append({ids[int(key.split("_")[1])]: float(p) for key, p in answer["probabilities"].items()})
         return out
+
+    def _verify_sync(self, context: str, items: list[dict[str, Any]], records: list[dict[str, Any]], prompt: Prompt) -> list[float]:
+        out = []
+        with self._lock:
+            for item, record in zip(items, records):
+                state, questions = laya_verify_inputs(context, item, record, prompt)
+                out.append(float(self._agent.predict(state, questions)["answers"]["verdict"]["probabilities"]["yes"]))
+        return out
+
+    async def verify(
+        self, context: str, items: list[dict[str, Any]], records: list[dict[str, Any]], prompt: Prompt = TEXT_PROMPT
+    ) -> list[float]:
+        """For each item, Laya's probability that it is the given type (a candidate record)."""
+        return await asyncio.to_thread(self._verify_sync, context, items, records, prompt)
 
     async def score(
         self,
@@ -271,9 +300,11 @@ async def decide(
         failure = _recent_failure(calibration.model) if calibration else None
         raise LinkerUnavailable(failure or "This linker needs Laya and the schema's calibration; use the llm linker.")
 
-    def decision(chosen: str, probabilities: dict[str, float], decided_by: str, i: int, suggestion: str | None = None) -> Decision:
+    def decision(chosen: str, probabilities: dict[str, float], decided_by: str, suggestion: str | None = None,
+                 confidence: float | None = None) -> Decision:
         calibrated = task in calibration.validated_tasks(linker)
-        return Decision(chosen, probabilities[chosen], decided_by, calibrated, probabilities, suggestion)
+        confidence = probabilities[chosen] if confidence is None else confidence
+        return Decision(chosen, confidence, decided_by, calibrated, probabilities, suggestion)
 
     decisions: list[Decision | None] = [None] * len(items)
     to_llm = list(range(len(items)))
@@ -283,7 +314,7 @@ async def decide(
         to_llm = []
         for i, probabilities in enumerate(plain):
             best = max(probabilities, key=probabilities.get)
-            decisions[i] = decision(best, probabilities, "system1", i)
+            decisions[i] = decision(best, probabilities, "system1")
             if linker == "system1+llm" and probabilities[best] < calibration.consult_below:
                 to_llm.append(i)
     if not to_llm:
@@ -297,9 +328,10 @@ async def decide(
         if choice != "none"
     }
 
-    # Laya scores the candidates again, given the LLM's choice: it decides again
-    # (system1+llm), or gives the probability of the LLM's choice (llm).
+    # system1+llm: Laya scores the candidates again, given the LLM's choice, and decides again.
+    # llm: Laya ranks the candidates on its own and answers yes/no on the LLM's choice.
     hinted: dict[int, dict[str, float]] = {}
+    verdicts: dict[int, float] = {}
     if system1 and labels:
         consulted = sorted(labels)
         try:
@@ -308,7 +340,12 @@ async def decide(
             if linker != "llm":
                 raise
             scorer = None  # the LLM's choice stands, without a probability
-        if scorer is not None:
+        if scorer is not None and linker == "llm":
+            chosen = [next(c for c in items[i]["candidates"] if c["id"] == choices[i]) for i in consulted]
+            scores = await scorer.score(context, [items[i] for i in consulted], prompt=prompt)
+            yes = await scorer.verify(context, [items[i] for i in consulted], chosen, prompt=prompt)
+            hinted, verdicts = dict(zip(consulted, scores)), dict(zip(consulted, yes))
+        elif scorer is not None:
             scores = await scorer.score(context, [items[i] for i in consulted], [labels[i] for i in consulted], prompt=prompt)
             hinted = dict(zip(consulted, scores))
 
@@ -317,8 +354,9 @@ async def decide(
             # The LLM found no candidate that fits (for system1+llm: Laya was unsure too).
             decisions[i] = Decision("none", None, linker, False)
         elif linker == "llm":
-            decisions[i] = decision(choice, hinted[i], "llm", i, labels[i]) if i in hinted else Decision(choice, None, "llm", False)
+            decisions[i] = (decision(choice, hinted[i], "llm", labels[i], verdicts[i]) if i in verdicts
+                            else Decision(choice, None, "llm", False))
         else:
             best = max(hinted[i], key=hinted[i].get)
-            decisions[i] = decision(best, hinted[i], "system1+llm", i, labels[i])
+            decisions[i] = decision(best, hinted[i], "system1+llm", labels[i])
     return decisions  # type: ignore[return-value]
