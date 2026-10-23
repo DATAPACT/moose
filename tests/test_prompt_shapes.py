@@ -153,3 +153,12 @@ def test_small_one_step_prompts_define_their_types_and_large_ones_do_not() -> No
 def test_one_step_prompts_have_the_value_span_rules() -> None:
     prompt = build_text_ner_prompt(get_schema_config("coarse"), [{"task_id": "t", "text": "x"}], ["PERSON"])
     assert 'without cue words or field names before it' in prompt and "named entities only" in prompt
+
+
+def test_article_rule_keeps_names_and_schema_rules_take_precedence() -> None:
+    from moose.prompts import build_mention_prompt
+
+    coarse = get_schema_config("coarse")
+    one_step = build_text_ner_prompt(coarse, [{"task_id": "t", "text": "The Hague"}], ["LOCATION"])
+    assert 'unless they are part of a name' in one_step and '"The Hague"' in build_mention_prompt(coarse, "x")
+    assert "the schema's rules at the end of this list take precedence" in one_step

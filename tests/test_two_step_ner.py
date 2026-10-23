@@ -408,3 +408,12 @@ def test_a_calibration_can_name_its_own_model_override(monkeypatch: pytest.Monke
     # Schemas without their own variable follow MOOSE_LAYA_MODEL, and keep top-1 confidence.
     privacy = Calibration.load(get_schema_config("dpv_privacy").linker_calibration)
     assert (privacy.model, privacy.confidence) == ("/base", "top1")
+
+
+def test_an_unknown_confidence_mode_is_rejected(tmp_path) -> None:
+    from moose.linkers import Calibration
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps({"confidence": "families"}))
+    with pytest.raises(ValueError, match="confidence must be one of top1, family"):
+        Calibration.load(path)

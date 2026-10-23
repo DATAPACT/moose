@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 LINKERS = ("system1+llm", "system1", "llm")
+CONFIDENCE_MODES = ("top1", "family")
 SYSTEM1_LINKERS = ("system1+llm", "system1")
 DEFAULT_LAYA_MODEL = "convaiinnovations/laya"
 # Characters of each candidate's definition shown to Laya: definitions help it a lot,
@@ -83,6 +84,8 @@ class Calibration:
         known = {k: data[k] for k in fields if k in data}
         if "validated_for" in known:
             known["validated_for"] = tuple(known["validated_for"])
+        if known.get("confidence", "top1") not in CONFIDENCE_MODES:
+            raise ValueError(f"{path}: confidence must be one of {', '.join(CONFIDENCE_MODES)}.")
         override = os.getenv(known.get("model_env", "MOOSE_LAYA_MODEL"))
         if override:
             known["model"] = override
