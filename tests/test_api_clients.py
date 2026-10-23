@@ -476,7 +476,9 @@ def test_schema_list_says_which_linkers_a_two_step_schema_can_use(client: TestCl
 
     for module in (main_module, ner_module):
         monkeypatch.setattr(module, "system1_ready", lambda calibration: calibration is not None)
-    privacy, coarse, sti = listed()["dpv_privacy"], listed()["coarse"], listed()["sti"]
+    privacy, coarse, sti, pd = listed()["dpv_privacy"], listed()["coarse"], listed()["sti"], listed()["dpv_pd"]
+    # Validation follows the default linker's calibrator (dpv_pd: Laya alone, validated for text).
+    assert pd["system1_validated_for"] == ["text"]
     assert (privacy["candidate_mode"], privacy["linker"], privacy["linkers"], privacy["system1_validated_for"]) == (
         "two_step", "system1+llm", ["system1+llm", "system1", "llm"], ["text"],
     )

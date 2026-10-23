@@ -10,6 +10,7 @@ from moose.config import Settings
 from moose.cpa import run_table_cpa
 from moose.ingest import ingest_schema_payload
 from moose.llm import LLMClient, OpenAICompatibleClient, track_llm_usage
+from moose.llm.openrouter import openrouter_routing
 from moose.ner import run_table_annotate, run_tabular_ner, run_text_ner
 from moose.privacy import run_privacy_analyze
 from moose.vault import VaultError
@@ -327,6 +328,7 @@ class WorkerPool:
             timeout=self._settings.MOOSE_TIMEOUT_SECS,
             provider=route.provider,
             extra_headers={"X-Title": "Moose"} if route.provider == "openrouter" else None,
+            extra_body=openrouter_routing(self._settings.MOOSE_OPENROUTER_PROVIDER_SORT) if route.provider == "openrouter" else None,
         )
 
     async def shared_client(self, model: str) -> LLMClient:

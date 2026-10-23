@@ -133,7 +133,8 @@ async def test_run_table_annotate_sti_returns_coarse_and_fine_for_ne_columns_onl
     by_col = {c["column"]: c for c in out["results"][0]["columns"]}
     assert by_col["name"]["coarse_type_id"] == "NE:PERSON"
     assert by_col["name"]["fine_type_id"] == "PERSON"
-    assert by_col["name"]["fine_confidence"] == 1.0
+    # The LLM's numbers are never used as probabilities; without the System 1 model there is none.
+    assert "fine_confidence" not in by_col["name"] and by_col["name"]["confidence"] is None
     assert by_col["movie"]["coarse_type_id"] == "NE:OTHER"
     assert by_col["movie"]["fine_type_id"] == "FILM"
     assert by_col["email"]["coarse_type_id"] == "LIT:STRING"

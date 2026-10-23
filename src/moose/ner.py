@@ -11,6 +11,7 @@ from moose.config import Settings, get_settings
 from moose.linkers import (
     SYSTEM1_LINKERS,
     TABLE_PROMPT,
+    TEXT_PROMPT,
     Calibration,
     Decision,
     LinkerUnavailable,
@@ -280,6 +281,7 @@ async def run_text_ner(
     prompt = build_text_ner_prompt(schema_config, tasks, selected_type_ids)
 
     def validator(raw_text: str):
+        raw_text = _choices_to_scores(raw_text, selected_type_ids, require_all_scores)
         normalized_raw = _coerce_text_ner_output_with_task_ids(raw_text, tasks)
         return validate_ner_response_with_warnings(
             [{"task_id": t["task_id"], "text": t["text"]} for t in tasks],
@@ -299,17 +301,22 @@ async def run_text_ner(
         entities = []
         for entity in item.entities:
             scores = {type_id: float(entity.scores.get(type_id, 0)) for type_id in selected_type_ids}
-            type_id, confidence, _distribution = choose_argmax(scores)
+            type_id, _chosen_score, _distribution = choose_argmax(scores)
             output = {
                 "start": entity.start,
                 "end": entity.end,
                 "text": original_text[entity.start : entity.end],
                 "type_id": type_id,
-                "confidence": confidence,
             }
             if schema_config.coarse_mapping:
                 output["coarse_type_id"] = schema_config.coarse_mapping.get(type_id)
             entities.append(output)
+        # The LLM chose each type; the probability is the System 1 model's.
+        probabilities = await _system1_probabilities(
+            schema_config, original_text, [{"text": e["text"], "type_id": e["type_id"]} for e in entities], TEXT_PROMPT, "text"
+        )
+        for output, extra in zip(entities, probabilities):
+            output.update(extra)
         results_by_id[item.task_id] = {"task_id": item.task_id, "entities": entities}
 
     ordered = [results_by_id[task["task_id"]] for task in tasks]
@@ -346,13 +353,14 @@ def _parse_mentions(raw_text: str, text: str) -> list[dict[str, Any]]:
     return sorted(mentions, key=lambda m: m["start"])
 
 
-def _parse_choices(raw_text: str, mentions: list[dict[str, Any]], key: str = "mention") -> dict[int, tuple[str, float]]:
-    """{"choices": [{<key>: index, "type_id": ..., "confidence": ...}]}; key is "mention" or "column"."""
+def _parse_choices(raw_text: str, mentions: list[dict[str, Any]], key: str = "mention") -> dict[int, str]:
+    """{"choices": [{<key>: index, "type_id": ...}]}; key is "mention" or "column". Any number
+    the LLM adds is ignored: probabilities come from the System 1 model (moose.linkers)."""
     data = extract_json(raw_text)
     items = data.get("choices") if isinstance(data, dict) else data
     if not isinstance(items, list):
         raise ValueError('Expected {"choices": [...]}.')
-    chosen: dict[int, tuple[str, float]] = {}
+    chosen: dict[int, str] = {}
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get(key), int):
             raise ValueError(f'Each choice needs an integer "{key}".')
@@ -362,11 +370,7 @@ def _parse_choices(raw_text: str, mentions: list[dict[str, Any]], key: str = "me
         allowed = {c["id"] for c in mentions[index]["candidates"]}
         if type_id != "none" and type_id not in allowed:
             raise ValueError(f'{key.capitalize()} {index}: "{type_id}" is not one of its candidates.')
-        try:
-            confidence = min(max(float(item.get("confidence", 1.0)), 0.0), 1.0)
-        except (TypeError, ValueError):
-            confidence = 1.0
-        chosen[index] = (type_id, confidence)
+        chosen[index] = type_id
     return chosen
 
 
@@ -404,7 +408,7 @@ def resolve_linker(requested: str | None, calibration: Calibration | None, defau
 
 async def _llm_choices(
     text: str, mentions: list[dict[str, Any]], schema: SchemaConfig, llm_client, settings: Settings
-) -> dict[int, tuple[str, float]]:
+) -> dict[int, str]:
     if not mentions:
         return {}
     return await _run_with_retries(
@@ -413,6 +417,61 @@ async def _llm_choices(
         lambda raw: _parse_choices(raw, mentions),
         settings.MOOSE_MAX_RETRIES,
     )
+
+
+def _choices_to_scores(raw_text: str, type_ids: list[str], dense: bool) -> str:
+    """One-step prompts ask the LLM for a type_id only, never for numbers. The validators
+    work on score maps, so each chosen type becomes a one-hot map."""
+    try:
+        data = extract_json(raw_text)
+    except (ValueError, json.JSONDecodeError):
+        return raw_text
+
+    def convert(node: Any) -> Any:
+        if isinstance(node, list):
+            return [convert(x) for x in node]
+        if isinstance(node, dict):
+            node = {k: convert(v) for k, v in node.items()}
+            if isinstance(node.get("type_id"), str) and "scores" not in node:
+                chosen = node["type_id"]
+                node["scores"] = {t: (1.0 if t == chosen else 0.0) for t in type_ids} if dense else {chosen: 1.0}
+            return node
+        return node
+
+    return json.dumps(convert(data), ensure_ascii=False)
+
+
+async def _system1_probabilities(
+    schema: SchemaConfig, context: str, choices: list[dict[str, Any]], prompt, task: str
+) -> list[dict[str, Any]]:
+    """For types an LLM chose in one step: the System 1 model's probability of each choice,
+    scored among the chosen type and a few retrieved neighbours, given the LLM's choice.
+    No probability (None) when the System 1 model is not available."""
+    unavailable = {"confidence": None, "calibrated": False, "decided_by": "llm"}
+    calibration = Calibration.load(schema.linker_calibration)
+    if not choices or not system1_ready(calibration):
+        return [dict(unavailable) for _ in choices]
+    try:
+        scorer = await get_scorer(calibration.model)
+    except LinkerUnavailable:
+        return [dict(unavailable) for _ in choices]
+    index = candidate_index(schema)
+    by_id = {r["id"]: r for r in index.records}
+    items, labels = [], []
+    for choice in choices:
+        chosen = by_id.get(choice["type_id"]) or {"id": choice["type_id"], "label": choice["type_id"], "parents": []}
+        label = chosen.get("label") or chosen["id"]
+        neighbours = [r for r in index.top_k(f"{label} {choice['text']}", schema.candidate_k) if r["id"] != chosen["id"]]
+        items.append({"text": choice["text"], "candidates": [chosen, *neighbours]})
+        labels.append(label)
+    scores = await scorer.score(context, items, labels, prompt=prompt)
+    out = []
+    for choice, item, probabilities in zip(choices, items, scores):
+        raw = calibration.confidence_of(probabilities, choice["type_id"], item["candidates"])
+        probability, calibrated = calibration.probability("one_step", raw, task)
+        out.append({"confidence": round(probability, 4), "calibrated": calibrated, "decided_by": "llm",
+                    "ranking": ranked(probabilities)})
+    return out
 
 
 async def _two_step_text_task(
@@ -433,7 +492,7 @@ async def _two_step_text_task(
     calibration = Calibration.load(schema.linker_calibration)
     linker = resolve_linker(linker, calibration, schema.linker)
 
-    async def ask_llm(items: list[dict[str, Any]]) -> dict[int, tuple[str, float]]:
+    async def ask_llm(items: list[dict[str, Any]]) -> dict[int, str]:
         return await _llm_choices(text, items, schema, llm_client, settings)
 
     decisions = await decide(linker, text, mentions, calibration, ask_llm)
@@ -455,7 +514,7 @@ def _decision_fields(decision: Decision, item: dict[str, Any], schema: SchemaCon
     """The type, its probability and how it was decided, for an entity or a column."""
     fields: dict[str, Any] = {
         "type_id": decision.type_id,
-        "confidence": round(decision.confidence, 4),
+        "confidence": round(decision.confidence, 4) if decision.confidence is not None else None,
         "calibrated": decision.calibrated,
         "decided_by": decision.decided_by,
         "category": item["category"],
@@ -526,7 +585,7 @@ async def _two_step_table_task(
     calibration = Calibration.load(schema.linker_calibration)
     linker = resolve_linker(linker, calibration, schema.linker)
 
-    async def ask_llm(chosen: list[dict[str, Any]]) -> dict[int, tuple[str, float]]:
+    async def ask_llm(chosen: list[dict[str, Any]]) -> dict[int, str]:
         return await _run_with_retries(
             llm_client,
             build_column_choice_prompt(schema, chosen),
@@ -561,6 +620,7 @@ async def _run_table_annotate_once(
     prompt = build_table_prompt(schema_config, tasks, type_ids)
 
     def validator(raw_text: str):
+        raw_text = _choices_to_scores(raw_text, type_ids, schema_config.require_all_scores)
         normalized_raw = _coerce_table_output_with_task_ids(raw_text, tasks)
         return validate_table_response(
             tasks,
@@ -580,11 +640,17 @@ async def _run_table_annotate_once(
         columns: list[dict[str, Any]] = []
         for column in item.columns:
             scores = {type_id: float(column.scores.get(type_id, 0)) for type_id in type_ids}
-            type_id, confidence, _distribution = choose_argmax(scores)
-            output = {"column": column.column, "type_id": type_id, "confidence": confidence}
+            type_id, _chosen_score, _distribution = choose_argmax(scores)
+            output = {"column": column.column, "type_id": type_id}
             if schema_config.coarse_mapping:
                 output["coarse_type_id"] = schema_config.coarse_mapping.get(type_id)
             columns.append(output)
+        # The LLM chose each type; the probability is the System 1 model's.
+        samples = _column_samples(task["sampled_rows"])
+        choices = [{"text": f"{c['column']}: {' | '.join(samples.get(c['column'], [])) or '(empty)'}", "type_id": c["type_id"]}
+                   for c in columns]
+        for output, extra in zip(columns, await _system1_probabilities(schema_config, ", ".join(samples), choices, TABLE_PROMPT, "table")):
+            output.update(extra)
         results_by_id[item.task_id] = {
             "task_id": item.task_id,
             "table_id": task["table_id"],

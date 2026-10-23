@@ -13,8 +13,8 @@ services:
     build:
       context: .
       args:
-        # "laya" installs the local Laya linker for two-step schemas.
-        MOOSE_EXTRAS: ${MOOSE_EXTRAS:-}
+        # "laya" (the default) installs the System 1 model that gives every probability.
+        MOOSE_EXTRAS: ${MOOSE_EXTRAS-laya}
     ports:
       - "${MOOSE_BIND_ADDRESS:-127.0.0.1}:${MOOSE_API_PORT:-8000}:8000"
     env_file:

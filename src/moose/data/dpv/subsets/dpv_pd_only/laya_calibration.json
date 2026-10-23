@@ -1,6 +1,82 @@
 {
   "model": "convaiinnovations/laya",
-  "consult_below": 0.9,
+  "consult_below": 0.0,
   "validated_for": [],
-  "fitted_on": "DPVCallBench v0.1 dev (267 mentions with exact gold spans), dpv_pd two-step candidates, LLM openai/gpt-oss-120b; research/dpv_eval/fit_system1.py. At this threshold: accuracy 0.805, ECE 0.134; LLM alone 0.79."
+  "fitted_on": "Zero-shot Laya on DPVCallBench v0.1 train+dev+test (1275 mentions with exact gold spans), dpv_pd two-step candidates: Laya alone was right 70.4% of the time with held-out ECE 0.067, consulting the LLM below 0.9 66.4% with ECE 0.120, so the default never consults the LLM. research/dpv_eval/fit_calibrators.py",
+  "calibrators": {
+    "system1": {
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ]
+      ],
+      "validated_for": [
+        "text"
+      ],
+      "fitted_on": "DPVCallBench v0.1 train+dev+test (1275 mentions with exact gold spans, 94 template families). Held-out ECE (5 folds by template family): raw 0.067, isotonic 0.089; raw kept. Accuracy 0.704. research/dpv_eval/fit_calibrators.py"
+    },
+    "system1+llm": {
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ]
+      ],
+      "validated_for": [
+        "text"
+      ],
+      "fitted_on": "DPVCallBench v0.1 train+dev+test (1275 mentions with exact gold spans, 94 template families). Held-out ECE (5 folds by template family): raw 0.067, isotonic 0.089; raw kept. Accuracy 0.704. research/dpv_eval/fit_calibrators.py"
+    },
+    "llm": {
+      "points": [
+        [
+          0.0156,
+          0.0
+        ],
+        [
+          0.0212,
+          0.6437
+        ],
+        [
+          0.7377,
+          0.6437
+        ],
+        [
+          0.7378,
+          0.7302
+        ],
+        [
+          0.9756,
+          0.7302
+        ],
+        [
+          0.9773,
+          0.9776
+        ],
+        [
+          0.9979,
+          0.9776
+        ],
+        [
+          0.998,
+          1.0
+        ],
+        [
+          0.9997,
+          1.0
+        ]
+      ],
+      "validated_for": [],
+      "fitted_on": "DPVCallBench v0.1 train+dev+test (1275 mentions with exact gold spans, 94 template families). Held-out ECE (5 folds by template family): raw 0.293, isotonic 0.104; isotonic kept. Accuracy 0.709. research/dpv_eval/fit_calibrators.py"
+    }
+  }
 }

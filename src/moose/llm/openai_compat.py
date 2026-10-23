@@ -57,10 +57,13 @@ class OpenAICompatibleClient(LLMClient):
         api_key: ApiKey = None,
         provider: str = "gateway",
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, object] | None = None,
     ) -> None:
         super().__init__(provider=provider, model=model)
         self._api_key = api_key
         self._extra_headers = dict(extra_headers or {})
+        # Added to every chat request, e.g. OpenRouter's provider routing preferences.
+        self._extra_body = dict(extra_body or {})
         self._client = httpx.AsyncClient(timeout=timeout, base_url=base_url.rstrip("/"))
 
     def _resolve_api_key(self) -> str | None:
@@ -77,6 +80,7 @@ class OpenAICompatibleClient(LLMClient):
 
     async def generate(self, prompt: str) -> str:
         payload = {
+            **self._extra_body,
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,

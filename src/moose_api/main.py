@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import asyncio
 import json
 import time
 import uuid
@@ -19,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from moose.config import Settings, get_settings
 from moose.ingest import delete_user_schema, preview_schema_payload, update_user_schema_metadata
 from moose.pipelines import load_privacy_profiles
-from moose.linkers import LINKERS, SYSTEM1_LINKERS, Calibration, system1_ready
+from moose.linkers import LINKERS, SYSTEM1_LINKERS, Calibration, LinkerUnavailable, get_scorer, laya_available, system1_ready
 from moose.ner import resolve_linker, two_step_active
 from moose.schema import get_schema_config, list_schema_names, reload_schema_registry
 from moose.privacy import get_machine_report_json_schema, list_policy_packs
@@ -486,6 +487,25 @@ def _ensure_schema_supported(
         raise HTTPException(status_code=400, detail=f"Schema '{schema}' does not support CPA annotation.")
 
 
+async def _preload_system1() -> None:
+    """Load (and warm up) each System 1 model the schemas use; failures are only logged here,
+    since every request falls back or reports them itself."""
+    if not laya_available():
+        return
+    models = set()
+    for name in list_schema_names():
+        calibration = Calibration.load(get_schema_config(name).linker_calibration)
+        if calibration is not None:
+            models.add(calibration.model)
+    warm_up = [{"text": "warm-up", "candidates": [{"id": "a", "label": "a"}, {"id": "b", "label": "b"}]}]
+    for model in sorted(models):
+        try:
+            scorer = await get_scorer(model)
+            await scorer.score("warm-up", warm_up)
+        except LinkerUnavailable as exc:
+            print(f"System 1 model not loaded at startup: {exc}", flush=True)
+
+
 @app.on_event("startup")
 async def startup() -> None:
     settings = get_settings()
@@ -524,6 +544,8 @@ async def startup() -> None:
     worker_pool = WorkerPool(queue_backend, job_store, shared_models, settings)
     await worker_pool.start()
     app.state.worker_pool = worker_pool
+    # Load the System 1 model in the background, so the first request does not wait for it.
+    app.state.system1_preload = asyncio.create_task(_preload_system1())
 
 
 @app.on_event("shutdown")
@@ -997,8 +1019,8 @@ async def list_schemas(include_type_count: bool = False) -> dict[str, Any]:
             if item["candidate_mode"] == "two_step":
                 item["linker"] = resolve_linker(None, calibration, cfg.linker)
                 item["linkers"] = list(LINKERS) if system1_ready(calibration) else ["llm"]
-                # Tasks ("text", "table") on which its probabilities were checked against labelled data.
-                item["system1_validated_for"] = list(calibration.validated_for) if calibration else []
+                # Tasks ("text", "table") on which the default linker's probabilities were checked.
+                item["system1_validated_for"] = list(calibration.validated_tasks(item["linker"])) if calibration else []
         if include_type_count:
             try:
                 item["type_count"] = len(cfg.load_type_ids())

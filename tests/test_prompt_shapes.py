@@ -99,7 +99,8 @@ def test_dpv_pd_text_prompt_follows_contract_sections() -> None:
     assert "OUTPUT (API CONTRACT)" in prompt
     assert "ALLOWED LABEL SPACE" in prompt
     assert "SPAN RULES (NER BEST PRACTICES)" in prompt
-    assert "SCORING RULES" in prompt
+    assert "TYPE RULES" in prompt and "Do not give scores, probabilities or confidence values." in prompt
+    assert '"scores"' not in prompt
     assert "INPUT" in prompt
     assert "OUTPUT" in prompt
     assert "personal data categories (DPV-PD)" in prompt

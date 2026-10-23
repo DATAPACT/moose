@@ -74,7 +74,8 @@ async def test_two_step_finds_mentions_then_chooses_among_their_candidates() -> 
 
     entities = result["results"][0]["entities"]
     assert [(e["text"], e["type_id"]) for e in entities] == [("Luca Bianchi", "dpv-pd:Name"), ("USR 661 204", "dpv-pd:Identifier")]
-    assert entities[0]["confidence"] == 0.9 and entities[1]["category"] == "customer identifier"
+    # No System 1 model in this test: the LLM decided, and there is no probability (never the LLM's own).
+    assert entities[0]["confidence"] is None and entities[1]["category"] == "customer identifier"
     # Up to candidate_k retrieved, plus as many parents and children of the best hits.
     assert "dpv-pd:Identifier" in entities[1]["candidates"] and len(entities[1]["candidates"]) <= 16
     # The first prompt lists no type ids; the second shows only each mention's candidates.
@@ -189,15 +190,14 @@ async def test_system1_consults_the_llm_only_when_unsure_and_decides_again(monke
 
 
 @pytest.mark.asyncio
-async def test_llm_linker_does_not_run_laya(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    fake = _FakeLaya(plain={}, hinted={})
+async def test_llm_linker_takes_its_probability_from_laya_not_the_llm(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    fake = _FakeLaya(plain={}, hinted={"Luca Bianchi": {"dpv-pd:Name": 0.7}})
     _use_laya(monkeypatch, tmp_path, fake)
     llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.99}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
-    # The LLM's stated confidence, not calibrated; Laya's probability for the LLM's choice was
-    # too poorly calibrated on DPVCallBench to be worth computing.
-    assert (entity["decided_by"], entity["calibrated"], entity["confidence"]) == ("llm", False, 0.99)
-    assert fake.calls == [] and "ranking" not in entity
+    # The LLM's 0.99 is ignored; Laya scores the LLM's choice. No calibrator for llm: not calibrated.
+    assert (entity["decided_by"], entity["confidence"], entity["calibrated"]) == ("llm", 0.7, False)
+    assert fake.calls == [("Luca Bianchi", "Name")] and '"confidence"' not in llm.prompts[1]
 
 
 @pytest.mark.asyncio
@@ -207,7 +207,7 @@ async def test_without_laya_the_llm_decides_with_uncalibrated_confidence(monkeyp
     monkeypatch.setattr(linkers, "laya_available", lambda: False)
     llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.99}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm))["results"][0]["entities"]
-    assert (entity["confidence"], entity["calibrated"], entity["decided_by"]) == (0.99, False, "llm") and "ranking" not in entity
+    assert (entity["confidence"], entity["calibrated"], entity["decided_by"]) == (None, False, "llm") and "ranking" not in entity
 
 
 @pytest.mark.asyncio
@@ -368,7 +368,7 @@ async def test_llm_linker_still_works_when_laya_cannot_load(monkeypatch: pytest.
     _failing_laya(monkeypatch)
     llm = _ScriptedLLM({"mentions": MENTIONS["mentions"][:1]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name", "confidence": 0.9}]})
     [entity] = (await run_text_ner([{"task_id": "t", "text": TEXT}], "dpv_privacy", llm, linker="llm"))["results"][0]["entities"]
-    assert (entity["type_id"], entity["confidence"], entity["calibrated"]) == ("dpv-pd:Name", 0.9, False)
+    assert (entity["type_id"], entity["confidence"], entity["calibrated"]) == ("dpv-pd:Name", None, False)
 
 
 def test_dpv_annotates_in_two_steps_with_the_llm_deciding() -> None:
@@ -417,3 +417,50 @@ def test_an_unknown_confidence_mode_is_rejected(tmp_path) -> None:
     path.write_text(json.dumps({"confidence": "families"}))
     with pytest.raises(ValueError, match="confidence must be one of top1, family"):
         Calibration.load(path)
+
+
+
+def test_a_calibrator_maps_laya_probabilities_per_linker(tmp_path) -> None:
+    from moose.linkers import Calibration
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps({"validated_for": ["text"], "calibrators": {
+        "llm": {"points": [[0.0, 0.5], [0.5, 0.8], [1.0, 0.95]], "validated_for": ["text"]},
+    }}))
+    cal = Calibration.load(path)
+    assert cal.probability("llm", 0.25, "text") == (pytest.approx(0.65), True)
+    assert cal.probability("llm", 0.25, "table") == (pytest.approx(0.65), False)
+    # No calibrator for system1: Laya's raw probability, validated where the file says so.
+    assert cal.probability("system1", 0.4, "text") == (0.4, True)
+
+
+@pytest.mark.asyncio
+async def test_one_step_text_gets_its_probability_from_laya(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import dataclasses
+
+    import moose.ner as ner_module
+    from moose.schema import COARSE_TYPES
+
+    fake = _FakeLaya(plain={}, hinted={"Maria": {"PERSON": 0.8}})
+    _use_laya(monkeypatch, tmp_path, fake)
+    coarse = dataclasses.replace(get_schema_config("coarse"), candidate_mode="all",
+                                 linker_calibration=get_schema_config("dpv_privacy").linker_calibration)
+    monkeypatch.setattr(ner_module, "get_schema_config", lambda name: coarse)
+    llm = _ScriptedLLM({"entities": [{"start": 0, "end": 5, "text": "Maria", "type_id": "PERSON"}]})
+    [entity] = (await run_text_ner([{"task_id": "t", "text": "Maria lives in Milan."}], "coarse", llm))["results"][0]["entities"]
+    assert (entity["type_id"], entity["confidence"], entity["decided_by"]) == ("PERSON", 0.8, "llm")
+    assert '"scores"' not in llm.prompts[0] and fake.calls == [("Maria", "person")]
+
+
+def test_only_checked_linkers_count_as_calibrated(tmp_path) -> None:
+    from moose.linkers import Calibration
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps({"validated_for": ["text"], "calibrators": {
+        "system1": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": ["text"]},
+        "llm": {"points": [[0.0, 0.0], [1.0, 1.0]], "validated_for": []},
+    }}))
+    cal = Calibration.load(path)
+    assert cal.validated_tasks("system1") == ("text",) and cal.validated_tasks("llm") == ()
+    assert cal.validated_tasks("system1+llm") == ("text",)  # raw Laya, covered by the file's validated_for
+    assert cal.probability("one_step", 0.8, "text") == (0.8, False)  # never checked: not calibrated

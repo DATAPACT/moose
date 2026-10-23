@@ -212,17 +212,6 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
             )
         )
 
-    if schema.require_all_scores:
-        scoring_shape_rule = (
-            '- "scores" MUST include ALL allowed type_ids as keys. Do not add keys outside the allowed set.'
-        )
-        scoring_positive_rule = '- Each entity MUST have at least one score strictly > 0.'
-    else:
-        scoring_shape_rule = (
-            '- "scores" is a sparse map: include only relevant allowed type_ids; omit unrelated ones.'
-        )
-        scoring_positive_rule = '- Each entity MUST have at least one score strictly > 0.'
-
     lines = [
         intro,
         "",
@@ -245,7 +234,7 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
                 '      "start": <int>,',
                 '      "end": <int>,',
                 '      "text": "<exact substring from the input text>",',
-                '      "scores": {"<allowed_type_id>": <float in [0,1]>, ...}',
+                '      "type_id": "<one allowed type_id>"',
                 "    },",
                 "    ...",
                 "  ]",
@@ -266,7 +255,7 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
                 '      "start": <int>,',
                 '      "end": <int>,',
                 '      "text": "<exact substring from the input text>",',
-                '      "scores": {"<allowed_type_id>": <float in [0,1]>, ...}',
+                '      "type_id": "<one allowed type_id>"',
                 "    },",
                 "    ...",
                 "  ]",
@@ -278,7 +267,7 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
         [
             "",
             "ALLOWED LABEL SPACE",
-            '"scores" keys MUST be ONLY from this allowed set (no other keys permitted):',
+            '"type_id" MUST be one of this allowed set:',
             allowed_json,
             *_type_definition_lines(schema, type_ids),
             "",
@@ -296,14 +285,9 @@ def build_text_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: lis
             *[f"- {rule}" for rule in (schema.mention_rules or ())],
             '- If no entities exist, return: "entities": [].',
             "",
-            "SCORING RULES",
-            scoring_shape_rule,
-            "- Scores MUST be floats in [0,1].",
-            scoring_positive_rule,
-            "- Confidence guidance:",
-            "  - 0.90-1.00 for explicit direct mentions",
-            "  - 0.60-0.89 for clear but indirect mentions",
-            "  - 0.10-0.59 for weak or ambiguous mentions",
+            "TYPE RULES",
+            "- Give exactly one type_id per entity: the most specific allowed type that fits.",
+            "- Do not give scores, probabilities or confidence values.",
             "- Do NOT infer unstated concepts.",
             "",
             "INPUT",
@@ -448,13 +432,6 @@ def build_table_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: list[s
     ]
     types = ", ".join(type_ids)
     intro = _format_intro(schema.table_intro)
-    if schema.require_all_scores:
-        score_rule = "- Scores must be non-negative floats for every allowed type_id (include all keys).\n"
-    else:
-        score_rule = (
-            "- Scores must be non-negative floats for selected type_ids only; "
-            "omit unrelated types (missing keys treated as 0).\n"
-        )
     return "".join(
         [
             intro,
@@ -466,7 +443,7 @@ def build_table_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: list[s
             "  {\n",
             "    \"table_id\": \"...\",\n",
             "    \"columns\": [\n",
-            "      {\"column\": \"name\", \"scores\": {\"PERSON\": 0.1, \"MISC\": 0.2}}\n",
+            "      {\"column\": \"name\", \"type_id\": \"PERSON\"}\n",
             "    ]\n",
             "  }\n",
             "]\n",
@@ -475,8 +452,8 @@ def build_table_prompt(schema: SchemaConfig, tasks: list[dict], type_ids: list[s
             "- Return one entry per observed column name from observed_columns.\n",
             "- Column names in output MUST match observed_columns exactly (including case, underscores, and punctuation).\n",
             "- Do not rename, normalize, split, or merge column names.\n",
-            score_rule,
-            "- At least one score must be > 0 per column.\n",
+            "- Give exactly one type_id per column from the allowed type_ids.\n",
+            "- Do not give scores, probabilities or confidence values.\n",
             "No extra text around the JSON.\n\n",
             "Input tables JSON:\n",
             f"{json.dumps(payload, ensure_ascii=True)}",
@@ -554,7 +531,7 @@ def build_candidate_choice_prompt(schema: SchemaConfig, text: str, mentions: lis
             "Return ONLY valid JSON. No markdown. No extra text. One choice per mention:",
             "{",
             '  "choices": [',
-            '    {"mention": <index>, "type_id": "<one of its candidate ids, or none>", "confidence": <float in [0,1]>}',
+            '    {"mention": <index>, "type_id": "<one of its candidate ids, or none>"}',
             "  ]",
             "}",
         ]
@@ -614,7 +591,7 @@ def build_column_choice_prompt(schema: SchemaConfig, columns: list[dict[str, Any
             "Return ONLY valid JSON. No markdown. No extra text. One choice per column:",
             "{",
             '  "choices": [',
-            '    {"column": <index>, "type_id": "<one of its candidate ids, or none>", "confidence": <float in [0,1]>}',
+            '    {"column": <index>, "type_id": "<one of its candidate ids, or none>"}',
             "  ]",
             "}",
         ]
