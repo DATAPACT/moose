@@ -53,7 +53,7 @@ class OpenAICompatibleClient(LLMClient):
         self,
         base_url: str,
         model: str,
-        timeout: float,
+        timeout: float = 120.0,
         api_key: ApiKey = None,
         provider: str = "gateway",
         extra_headers: dict[str, str] | None = None,

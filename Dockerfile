@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
+COPY docs/library.md ./docs/library.md
 COPY src ./src
 COPY examples/schema_ingest_samples ./examples/schema_ingest_samples
 
@@ -12,7 +13,7 @@ COPY examples/schema_ingest_samples ./examples/schema_ingest_samples
 ARG MOOSE_EXTRAS="laya"
 # CPU-only PyTorch first: the default Linux wheel bundles CUDA (several GB) for no use here.
 RUN case ",$MOOSE_EXTRAS," in *,laya,*) pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu ;; esac \
-    && if [ -n "$MOOSE_EXTRAS" ]; then pip install --no-cache-dir -e ".[$MOOSE_EXTRAS]"; else pip install --no-cache-dir -e .; fi
+    && if [ -n "$MOOSE_EXTRAS" ]; then pip install --no-cache-dir -e ".[api,$MOOSE_EXTRAS]"; else pip install --no-cache-dir -e ".[api]"; fi
 
 EXPOSE 8000
 

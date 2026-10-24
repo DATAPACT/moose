@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
+COPY docs/library.md ./docs/library.md
 COPY src ./src
 COPY examples ./examples
 

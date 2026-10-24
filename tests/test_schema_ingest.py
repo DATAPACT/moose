@@ -19,8 +19,7 @@ def _patch_data_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(schema_mod, "DATA_DIR", data_dir)
     monkeypatch.setattr(schema_mod, "VOCAB_REGISTRY_PATH", data_dir / "vocabularies.json")
-    monkeypatch.setattr(schema_mod, "USER_VOCAB_REGISTRY_PATH", data_dir / "user_vocabularies.json")
-    monkeypatch.setattr(ingest_mod, "DATA_DIR", data_dir)
+    monkeypatch.delenv("MOOSE_USER_DATA_DIR", raising=False)
     _write_json(data_dir / "vocabularies.json", [])
     return data_dir
 

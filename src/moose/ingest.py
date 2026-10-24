@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from moose.schema import DATA_DIR, reload_schema_registry
+from moose.schema import reload_schema_registry, user_data_dir
 from moose.validate import extract_json
 
 
@@ -512,7 +512,7 @@ def update_user_schema_metadata(name: str, updates: dict[str, Any]) -> dict[str,
     if invalid:
         raise ValueError(f"Unsupported update fields: {sorted(invalid)}")
 
-    data_dir = DATA_DIR
+    data_dir = user_data_dir()
     registry = _load_user_registry(data_dir)
 
     idx = -1
@@ -555,7 +555,7 @@ def delete_user_schema(name: str, remove_files: bool = True) -> dict[str, Any]:
     if not _is_non_empty_string(name):
         raise ValueError("Schema name is required.")
     schema_name = name.strip()
-    data_dir = DATA_DIR
+    data_dir = user_data_dir()
     registry = _load_user_registry(data_dir)
 
     kept: list[dict[str, Any]] = []
@@ -709,7 +709,7 @@ async def _prepare_schema_ingest(
     schema_name = name.strip()
     _validate_schema_name(schema_name)
 
-    data_dir = DATA_DIR
+    data_dir = user_data_dir()
     raw_data, source_meta = await _fetch_source(payload)
     if len(raw_data) > MAX_SOURCE_BYTES:
         raise ValueError(f"Source payload too large ({len(raw_data)} bytes). Max allowed is {MAX_SOURCE_BYTES} bytes.")
@@ -857,7 +857,7 @@ async def preview_schema_payload(payload: dict[str, Any], llm_client: Any | None
 async def ingest_schema_payload(payload: dict[str, Any], llm_client: Any | None = None) -> dict[str, Any]:
     prepared = await _prepare_schema_ingest(payload, llm_client=llm_client)
     schema_name = prepared["schema"]
-    data_dir = DATA_DIR
+    data_dir = user_data_dir()
     schema_dir = data_dir / "user" / schema_name
     types_path = schema_dir / "types.json"
     type_ids_path = schema_dir / "type_ids.json"
