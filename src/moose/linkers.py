@@ -105,6 +105,20 @@ class Calibration:
         return self.validated_for if linker in SYSTEM1_LINKERS else ()
 
 
+async def llm_choice_verdicts(
+    calibration: Calibration | None, context: str, items: list[dict[str, Any]], records: list[dict[str, Any]], prompt: Prompt
+) -> list[float | None]:
+    """For types an LLM chose: Laya's yes/no probability that each is right (see
+    laya_verify_inputs). None for every item when Laya is not available."""
+    if not items or not system1_ready(calibration):
+        return [None] * len(items)
+    try:
+        scorer = await get_scorer(calibration.model)
+    except LinkerUnavailable:
+        return [None] * len(items)
+    return await scorer.verify(context, items, records, prompt)
+
+
 def system1_ready(calibration: Calibration | None) -> bool:
     """Laya is installed and its model has not just failed to load."""
     return calibration is not None and laya_available() and _recent_failure(calibration.model) is None
@@ -134,6 +148,13 @@ TABLE_PROMPT = Prompt(
     item_label="Column and sample values",
     instructions="Which category of personal data or privacy role do the column's values hold?",
     verify_question="Do the column's values hold {label}?",
+)
+CELL_PROMPT = Prompt(context_label="Table cell")
+CPA_PROMPT = Prompt(
+    context_label="Table",
+    item_label="Subject and target columns",
+    instructions="What is the relationship between the subject column and the target column?",
+    verify_question="Is the relationship between the subject column and the target column {label}?",
 )
 
 

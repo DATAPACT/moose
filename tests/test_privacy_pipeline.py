@@ -165,3 +165,11 @@ async def test_run_privacy_analyze_continues_when_initial_table_scan_fails(monke
     machine = reports["machine_readable"]["content"]
     assert machine["schema_id"] == "moose.privacy.machine_report.v1"
     assert machine["summary"]["task_count"] == 1
+
+
+def test_items_without_a_probability_are_kept_as_low_confidence() -> None:
+    from moose.privacy import is_ignored, is_low_confidence
+
+    pack = _pack_for_tests()
+    assert not is_ignored(pack, None) and is_ignored(pack, 0.0)
+    assert is_low_confidence(pack, None, [])[0]
