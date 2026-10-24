@@ -367,7 +367,10 @@ prompt tokens per text instead of 98,000).
 
 Tables, `coarse` and `fine` have no labelled data yet: Laya still gives every probability,
 marked `"calibrated": false` until a labelled set exists. Column relationships (CPA) and
-cell-level NER still use the LLM's own scores; moving them to the System 1 model is next.
+cell-level NER work the same way as other LLM decisions: the LLM gives one relation or type,
+and Laya's yes/no answer on it is the `confidence` ("Is the relationship between the subject
+column and the target column <relation>?", "Is the mention <type>?"). In privacy reports,
+items without a probability (no Laya on the server) are kept and flagged low-confidence.
 
 The API image includes Laya by default (`MOOSE_EXTRAS=laya`, CPU PyTorch, about 1 GB). Its
 model, about 800 MB, downloads into a Docker volume on first use. `MOOSE_LAYA_MODEL` points

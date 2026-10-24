@@ -60,14 +60,10 @@ def build_cpa_prompt(schema: SchemaConfig, task: dict[str, Any], relation_ids: l
     intro = _format_intro(schema.cpa_intro)
     allowed = ", ".join(relation_ids)
 
-    if schema.require_all_scores:
-        score_rule = "- Scores must include ALL relationship labels as keys.\n"
-    else:
-        score_rule = "- Scores may include ONLY a subset of relationship labels (missing labels are treated as 0).\n"
-
     rules_lines = [
         "- Output relationships for EXACTLY the provided target columns (no extra, no missing).",
-        "- Scores must be non-negative floats; at least one score must be > 0 per target column.",
+        "- Give exactly one relation_id per target column, from the allowed relationship labels.",
+        "- Do not give scores, probabilities or confidence values.",
     ]
     if none_label:
         rules_lines.append(f"- Choose {none_label} if there is no relationship.")
@@ -89,7 +85,7 @@ def build_cpa_prompt(schema: SchemaConfig, task: dict[str, Any], relation_ids: l
             '    "relationships": [',
             "      {",
             '        "target_column": "...",',
-            '        "scores": {"<label>": 1.0}',
+            '        "relation_id": "<label>"',
             "      }",
             "    ]",
             "  }",
@@ -97,7 +93,6 @@ def build_cpa_prompt(schema: SchemaConfig, task: dict[str, Any], relation_ids: l
             "",
             "Rules:",
             *rules_lines,
-            score_rule.rstrip(),
             "No extra text around the JSON.",
             "",
             "Input:",
@@ -326,13 +321,6 @@ def build_tabular_cell_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_
 
     types = ", ".join(type_ids)
     intro = _format_intro(schema.text_intro)
-    if schema.require_all_scores:
-        score_rule = "- Scores must be non-negative floats for every allowed type_id (include all keys).\n"
-    else:
-        score_rule = (
-            "- Scores must be non-negative floats for selected type_ids only; "
-            "omit unrelated types (missing keys treated as 0).\n"
-        )
 
     return "".join(
         [
@@ -352,7 +340,7 @@ def build_tabular_cell_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_
             "        \"start\": 0,\n",
             "        \"end\": 0,\n",
             "        \"text\": \"exact substring from the cell text\",\n",
-            "        \"scores\": {\"PERSON\": 0.1, \"MISC\": 0.2}\n",
+            "        \"type_id\": \"PERSON\"\n",
             "      }\n",
             "    ]\n",
             "  }\n",
@@ -362,8 +350,8 @@ def build_tabular_cell_ner_prompt(schema: SchemaConfig, tasks: list[dict], type_
             "- Each output item must keep the same row_index and column as its input cell.\n",
             "- Offsets are 0-based, end-exclusive.\n",
             "- entity.text MUST equal cell_text[start:end] exactly.\n",
-            score_rule,
-            "- At least one score must be > 0 per entity.\n",
+            "- Give exactly one type_id per entity, from the allowed type_ids.\n",
+            "- Do not give scores, probabilities or confidence values.\n",
             "No extra text around the JSON.\n\n",
             "Input cell tasks JSON:\n",
             f"{json.dumps(payload, ensure_ascii=True)}",

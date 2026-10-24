@@ -206,7 +206,7 @@ class EvidenceEntity(BaseModel):
     end: int
     text: str
     type_id: str
-    confidence: float
+    confidence: float | None  # None: no System 1 probability (Laya not available)
     categories: list[str] = Field(default_factory=list)
 
     confidence_threshold: float | None = None
@@ -219,7 +219,7 @@ class EvidenceColumn(BaseModel):
     table_id: str
     column: str
     type_id: str
-    confidence: float
+    confidence: float | None
     categories: list[str] = Field(default_factory=list)
 
     confidence_threshold: float | None = None
@@ -380,8 +380,18 @@ def confidence_threshold_for_categories(pack: PolicyPack, categories: list[str])
     return threshold
 
 
-def is_low_confidence(pack: PolicyPack, confidence: float, categories: list[str]) -> tuple[bool, float]:
-    if confidence < pack.confidence.ignore_below:
+def _probability(value: Any) -> float | None:
+    """An item's probability; None when it has none (annotated without the System 1 model)."""
+    return None if value is None else float(value)
+
+
+def is_ignored(pack: PolicyPack, confidence: float | None) -> bool:
+    """Dropped as noise. Items without a probability are kept, as low-confidence evidence."""
+    return confidence is not None and confidence < pack.confidence.ignore_below
+
+
+def is_low_confidence(pack: PolicyPack, confidence: float | None, categories: list[str]) -> tuple[bool, float]:
+    if confidence is None or confidence < pack.confidence.ignore_below:
         return True, confidence_threshold_for_categories(pack, categories)
     threshold = confidence_threshold_for_categories(pack, categories)
     return confidence < threshold, threshold
@@ -479,10 +489,10 @@ def build_text_facts(pack: PolicyPack, task_id: str, text: str, entities: list[d
 
     for e in entities:
         type_id = e["type_id"]
-        conf = float(e["confidence"])
+        conf = _probability(e.get("confidence"))
         cats = categories_for_type(pack, type_id)
 
-        if conf < pack.confidence.ignore_below:
+        if is_ignored(pack, conf):
             continue
 
         low, threshold = is_low_confidence(pack, conf, cats)
@@ -540,10 +550,10 @@ def build_table_facts(
 
     for col in columns:
         type_id = col["type_id"]
-        conf = float(col["confidence"])
+        conf = _probability(col.get("confidence"))
         cats = categories_for_type(pack, type_id)
 
-        if conf < pack.confidence.ignore_below:
+        if is_ignored(pack, conf):
             continue
 
         low, threshold = is_low_confidence(pack, conf, cats)
@@ -589,8 +599,8 @@ def build_table_facts(
                     if not isinstance(type_id, str):
                         continue
 
-                    conf = float(ent.get("confidence", 0.0))
-                    if conf < pack.confidence.ignore_below:
+                    conf = _probability(ent.get("confidence"))
+                    if is_ignored(pack, conf):
                         continue
 
                     cats = categories_for_type(pack, type_id)

@@ -9,6 +9,7 @@ from urllib.parse import quote, unquote
 from moose.candidates import candidate_index
 from moose.config import Settings, get_settings
 from moose.linkers import (
+    CELL_PROMPT,
     SYSTEM1_LINKERS,
     TABLE_PROMPT,
     TEXT_PROMPT,
@@ -17,6 +18,7 @@ from moose.linkers import (
     LinkerUnavailable,
     decide,
     get_scorer,
+    llm_choice_verdicts,
     ranked,
     system1_ready,
 )
@@ -188,6 +190,11 @@ def _coerce_cell_ner_output_with_task_ids(raw_text: str, tasks: list[dict[str, A
         key = (table_id if isinstance(table_id, str) else None, row_index, column)
         expected_by_coord[key] = task_id
         expected_ids.add(task_id)
+        # The prompt's output format has no table_id: match on row and column alone where
+        # only one table has that cell.
+        if key[0] is not None:
+            loose = (None, row_index, column)
+            expected_by_coord[loose] = "" if loose in expected_by_coord else task_id
 
     coerced: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -213,7 +220,7 @@ def _coerce_cell_ner_output_with_task_ids(raw_text: str, tasks: list[dict[str, A
                     resolved_task_id = expected_by_coord.get((None, row_index, column))
             else:
                 resolved_task_id = tasks[index]["task_id"]
-            if not isinstance(resolved_task_id, str):
+            if not isinstance(resolved_task_id, str) or not resolved_task_id:
                 raise ValueError("Unknown cell identifier in tabular cell NER response.")
 
         if resolved_task_id in seen_ids:
@@ -419,9 +426,9 @@ async def _llm_choices(
     )
 
 
-def _choices_to_scores(raw_text: str, type_ids: list[str], dense: bool) -> str:
-    """One-step prompts ask the LLM for a type_id only, never for numbers. The validators
-    work on score maps, so each chosen type becomes a one-hot map."""
+def _choices_to_scores(raw_text: str, type_ids: list[str], dense: bool, key: str = "type_id") -> str:
+    """One-step prompts ask the LLM for a type_id (or another `key`) only, never for numbers.
+    The validators work on score maps, so each chosen type becomes a one-hot map."""
     try:
         data = extract_json(raw_text)
     except (ValueError, json.JSONDecodeError):
@@ -432,8 +439,8 @@ def _choices_to_scores(raw_text: str, type_ids: list[str], dense: bool) -> str:
             return [convert(x) for x in node]
         if isinstance(node, dict):
             node = {k: convert(v) for k, v in node.items()}
-            if isinstance(node.get("type_id"), str) and "scores" not in node:
-                chosen = node["type_id"]
+            if isinstance(node.get(key), str) and "scores" not in node:
+                chosen = node[key]
                 node["scores"] = {t: (1.0 if t == chosen else 0.0) for t in type_ids} if dense else {chosen: 1.0}
             return node
         return node
@@ -903,6 +910,7 @@ async def run_tabular_ner(
 
     def validator(raw_text: str):
         base_tasks = [{"task_id": t["task_id"], "text": t["text"]} for t in cell_tasks]
+        raw_text = _choices_to_scores(raw_text, selected_type_ids, require_all_scores)
         normalized_raw = _coerce_cell_ner_output_with_task_ids(raw_text, cell_tasks)
         return validate_ner_response_with_warnings(
             base_tasks,
@@ -917,24 +925,33 @@ async def run_tabular_ner(
     parsed, warnings = await _run_with_retries(llm_client, prompt, validator, settings.MOOSE_MAX_RETRIES)
     all_warnings.extend(warnings)
 
+    calibration = Calibration.load(schema_config.linker_calibration)
+    records = {r["id"]: r for r in schema_config.load_type_records()}
     for item in parsed:
         text_for_cell = batch_text_by_id.get(item.task_id, "")
         entities_out: list[dict[str, Any]] = []
 
         for entity in item.entities:
             scores = {type_id: float(entity.scores.get(type_id, 0)) for type_id in selected_type_ids}
-            type_id, confidence, _distribution = choose_argmax(scores)
+            type_id, _llm_score, _distribution = choose_argmax(scores)
             output = {
                 "start": entity.start,
                 "end": entity.end,
                 "text": text_for_cell[entity.start : entity.end],
                 "type_id": type_id,
-                "confidence": confidence,
             }
             if schema_config.coarse_mapping:
                 output["coarse_type_id"] = schema_config.coarse_mapping.get(type_id)
             entities_out.append(output)
 
+        # Every probability is the System 1 model's: its yes/no answer on the LLM's type.
+        verdicts = await llm_choice_verdicts(
+            calibration, text_for_cell, [{"text": e["text"]} for e in entities_out],
+            [records.get(e["type_id"]) or {"id": e["type_id"]} for e in entities_out], CELL_PROMPT,
+        )
+        calibrated = "table" in calibration.validated_tasks("one_step") if calibration else False
+        for output, yes in zip(entities_out, verdicts):
+            output.update(confidence=round(yes, 4) if yes is not None else None, calibrated=calibrated, decided_by="llm")
         results_by_cell_id[item.task_id] = entities_out
 
     # Fill scaffold with extracted entities

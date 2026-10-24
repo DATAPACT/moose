@@ -5,9 +5,10 @@ from functools import lru_cache
 from typing import Any
 
 from moose.config import Settings, get_settings
-from moose.ner import run_table_annotate
+from moose.linkers import CPA_PROMPT, Calibration, llm_choice_verdicts
+from moose.ner import _choices_to_scores, run_table_annotate
 from moose.prob import choose_argmax
-from moose.prompts import build_cpa_prompt, build_type_selection_prompt
+from moose.prompts import build_cpa_prompt, build_type_selection_prompt, table_to_markdown
 from moose.schema import DATA_DIR, get_schema_config
 from moose.validate import extract_json, validate_cpa_response, validate_type_selection_response
 
@@ -372,6 +373,23 @@ def _chunk_targets_by_prompt_size(
 # --------------------------
 # Main CPA function
 # --------------------------
+async def _system1_probabilities(
+    schema_config, sampled_rows: list[dict[str, Any]], subject_column: str, relationships: list[dict[str, Any]], max_rows: int
+) -> None:
+    """Every probability is the System 1 model's: its yes/no answer on each relation the LLM
+    chose. Adds confidence (None without Laya), calibrated and decided_by in place."""
+    calibration = Calibration.load(schema_config.linker_calibration)
+    records = {r["id"]: r for r in schema_config.load_type_records()}
+    targets = [r["target_column"] for r in relationships]
+    context = table_to_markdown(sampled_rows, [subject_column, *targets], max_rows=max_rows)
+    items = [{"text": f"{subject_column} -> {target}"} for target in targets]
+    chosen = [records.get(r["relation_id"]) or {"id": r["relation_id"]} for r in relationships]
+    verdicts = await llm_choice_verdicts(calibration, context, items, chosen, CPA_PROMPT)
+    calibrated = "table" in calibration.validated_tasks("one_step") if calibration else False
+    for rel, yes in zip(relationships, verdicts):
+        rel.update(confidence=round(yes, 4) if yes is not None else None, calibrated=calibrated, decided_by="llm")
+
+
 async def run_table_cpa(
     tasks: list[dict[str, Any]],
     schema: str,
@@ -528,6 +546,7 @@ async def run_table_cpa(
                 allowed_set = set(selected_relation_ids)
 
                 def validator(raw_text: str):
+                    raw_text = _choices_to_scores(raw_text, selected_relation_ids, require_all_scores, key="relation_id")
                     normalized_raw = _coerce_cpa_output_with_task_ids(
                         raw_text,
                         [
@@ -559,9 +578,10 @@ async def run_table_cpa(
                 rel = item.relationships[0]
 
                 scores = {rid: float(rel.scores.get(rid, 0.0)) for rid in selected_relation_ids}
-                relation_id, confidence, _distribution = choose_argmax(scores)
+                relation_id, _llm_score, _distribution = choose_argmax(scores)
 
-                out: dict[str, Any] = {"target_column": target_col, "relation_id": relation_id, "confidence": confidence}
+                out: dict[str, Any] = {"target_column": target_col, "relation_id": relation_id}
+                await _system1_probabilities(schema_config, sampled_rows, subject_column, [out], max_rows_in_prompt)
                 relationships_out[target_col] = out
 
                 if debug:
@@ -615,6 +635,7 @@ async def run_table_cpa(
             prompt = build_cpa_prompt(schema_config, chunk_task, relation_ids, max_rows=max_rows_in_prompt)
 
             def validator(raw_text: str):
+                raw_text = _choices_to_scores(raw_text, relation_ids, require_all_scores, key="relation_id")
                 normalized_raw = _coerce_cpa_output_with_task_ids(
                     raw_text,
                     [{"task_id": task_id, "table_id": table_id, "subject_column": subject_column}],
@@ -640,9 +661,12 @@ async def run_table_cpa(
 
             for rel in item.relationships:
                 scores = {rid: float(rel.scores.get(rid, 0.0)) for rid in relation_ids}
-                relation_id, confidence, _distribution = choose_argmax(scores)
-                out: dict[str, Any] = {"target_column": rel.target_column, "relation_id": relation_id, "confidence": confidence}
-                relationships_out[rel.target_column] = out
+                relation_id, _llm_score, _distribution = choose_argmax(scores)
+                relationships_out[rel.target_column] = {"target_column": rel.target_column, "relation_id": relation_id}
+            await _system1_probabilities(
+                schema_config, sampled_rows, subject_column, [relationships_out[c] for c in chunk_targets if c in relationships_out],
+                max_rows_in_prompt,
+            )
 
         ordered_relationships = [relationships_out[c] for c in target_columns if c in relationships_out]
         results_by_id[task_id] = {
