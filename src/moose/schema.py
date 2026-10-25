@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -123,7 +124,18 @@ TYPE_DEFINITIONS = {
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 VOCAB_REGISTRY_PATH = DATA_DIR / "vocabularies.json"
-USER_VOCAB_REGISTRY_PATH = DATA_DIR / "user_vocabularies.json"
+
+
+def user_data_dir() -> Path:
+    """Where user (bring-your-own) schemas live: MOOSE_USER_DATA_DIR if set; ~/.moose for an
+    installed package, whose own folder may not be writable; else the package's data folder
+    (a source checkout and the Docker image, which mounts it)."""
+    configured = os.getenv("MOOSE_USER_DATA_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    if {"site-packages", "dist-packages"} & set(DATA_DIR.parts):
+        return Path.home() / ".moose"
+    return DATA_DIR
 
 DEFAULT_TEXT_INTRO = "You are a high-precision NER engine."
 DEFAULT_TABLE_INTRO = "You are a semantic typing engine for tabular data."
@@ -414,8 +426,9 @@ def _schema_registry() -> dict[str, SchemaConfig]:
     }
 
     seen_registry_names: set[str] = set()
-    registry_paths = [VOCAB_REGISTRY_PATH, USER_VOCAB_REGISTRY_PATH]
-    for registry_path in registry_paths:
+    # Each registry's relative paths are relative to its own folder.
+    registry_paths = [(VOCAB_REGISTRY_PATH, DATA_DIR), (user_data_dir() / "user_vocabularies.json", user_data_dir())]
+    for registry_path, base_dir in registry_paths:
         for entry in _load_vocab_registry_entries(registry_path):
             name = entry.get("name")
             if not isinstance(name, str) or not name.strip():
@@ -429,7 +442,7 @@ def _schema_registry() -> dict[str, SchemaConfig]:
                 raise ValueError(f"Vocabulary {name} missing type_source path.")
             data_path = Path(source.strip())
             if not data_path.is_absolute():
-                data_path = DATA_DIR / data_path
+                data_path = base_dir / data_path
             label = entry.get("label")
             description = entry.get("description")
             candidate_mode, candidate_k = _parse_candidate_mode(entry)

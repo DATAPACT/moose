@@ -9,7 +9,7 @@ from moose.llm.usage import record_llm_call
 
 
 class OllamaClient(LLMClient):
-    def __init__(self, host: str, token: str | None, model: str, timeout: float) -> None:
+    def __init__(self, host: str, token: str | None, model: str, timeout: float = 120.0) -> None:
         super().__init__(provider="ollama", model=model)
         headers = {}
         if token:

@@ -17,7 +17,7 @@ class OpenRouterClient(OpenAICompatibleClient):
         self,
         api_key: ApiKey,
         model: str,
-        timeout: float,
+        timeout: float = 120.0,
         base_url: str = OPENROUTER_BASE_URL,
         provider_sort: str | None = "throughput",
     ) -> None:

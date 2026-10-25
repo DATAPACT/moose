@@ -60,7 +60,7 @@ Then set up the shared models as described in [Shared models](#shared-models).
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[api,dev]"
 
 export MOOSE_API_KEY=test-dev-key
 export MOOSE_SECRET_KEY=<random secret>
@@ -139,18 +139,22 @@ Then, on the VM:
 
 ## Library use
 
-The `moose` package can call an LLM without the API. Keys come
-from your own code, an environment variable, or a callable that reads a keychain
-or secrets manager on every request:
+Moose is also a Python library, `moose-annotate` on PyPI, imported as `moose`. It runs on
+your machine: LLM calls go straight to your provider with your key, and Laya runs locally.
+
+```bash
+pip install "moose-annotate[laya]"
+```
 
 ```python
-import keyring
-from moose.llm import OllamaClient, OpenRouterClient
+from moose import Annotator, OpenRouterClient
 
-llm = OllamaClient(host="http://localhost:11434", token=None, model="qwen3:8b", timeout=120)
-llm = OpenRouterClient(api_key=lambda: keyring.get_password("moose", "openrouter"),
-                       model="anthropic/claude-sonnet-4.5", timeout=120)
+moose = Annotator(OpenRouterClient(api_key=os.environ["OPENROUTER_API_KEY"], model="openai/gpt-oss-120b"))
+moose.annotate_text("Thanks, Luca Bianchi. Your customer ID is USR 661 204.")
 ```
+
+See [docs/library.md](docs/library.md) for tables, column relationships, privacy analysis,
+your own schemas and async use.
 
 ## Auth Headers
 
