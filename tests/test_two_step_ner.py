@@ -459,3 +459,51 @@ def test_the_yes_no_question_names_one_type_and_not_the_llm() -> None:
     assert questions["verdict"]["criteria"] == {"yes": "Yes, it is Name: A person's name.", "no": "No, it is not Name"}
     _, table = laya_verify_inputs("Customer, E-mail", {"text": "E-mail: a@b.c"}, record, TABLE_PROMPT)
     assert table["verdict"]["instructions"] == "Do the column's values hold Name?"
+
+
+def test_long_texts_are_cut_into_chunks_at_paragraph_breaks() -> None:
+    from moose.ner import _text_chunks
+
+    text = "\n\n".join(f"Paragraph {i}: " + "word " * 60 for i in range(20))
+    chunks = _text_chunks(text, 1000)
+    assert len(chunks) > 1 and "".join(piece for _, piece in chunks) == text
+    assert all(len(piece) <= 1000 and text[offset : offset + len(piece)] == piece for offset, piece in chunks)
+    assert all(piece.endswith("\n\n") for _, piece in chunks[:-1])
+    assert _text_chunks("short") == [(0, "short")]
+
+
+@pytest.mark.asyncio
+async def test_mentions_in_a_long_text_are_found_per_chunk_with_offsets_into_the_whole_text() -> None:
+    from moose.ner import _text_chunks
+
+    filler = "Nothing to see here. " * 60
+    text = f"{filler}\n\nThe applicant, Mr Luca Bianchi, was born in 1954.\n\n{filler}"
+    chunks = _text_chunks(text)
+    assert len(chunks) > 1
+
+    class _PerChunkLLM:
+        async def generate(self, prompt: str) -> str:
+            if 'Return {"mentions": []}' not in prompt:  # the decision step
+                return json.dumps({"choices": [{"mention": 0, "type_id": "dpv-pd:Name"}]})
+            # Offsets relative to the chunk; only the chunk holding the name has a mention.
+            found = [{"start": 0, "end": 0, "text": "Luca Bianchi", "category": "person name"}] if "Luca Bianchi" in prompt else []
+            return json.dumps({"mentions": found})
+
+    result = await run_text_ner([{"task_id": "t", "text": text}], "dpv_privacy", _PerChunkLLM())
+    [entity] = result["results"][0]["entities"]
+    assert text[entity["start"] : entity["end"]] == "Luca Bianchi" and entity["type_id"] == "dpv-pd:Name"
+
+
+def test_laya_sees_the_text_around_a_mention_in_a_long_text() -> None:
+    from moose.linkers import LAYA_CONTEXT_CHARS, laya_inputs
+
+    candidates = [{"id": "dpv-pd:Name", "label": "Name"}]
+    long_text = "Procedure. " * 200 + "The applicant, Mr Luca Bianchi, was born in 1954. " + "Facts. " * 200
+    start = long_text.index("Luca Bianchi")
+    item = {"text": "Luca Bianchi", "start": start, "end": start + 12, "candidates": candidates}
+    state, _ = laya_inputs(long_text, item)
+    context = state.split("\n")[0]
+    assert "Mr Luca Bianchi, was born" in context and len(context) < LAYA_CONTEXT_CHARS + 40
+    # Short texts, and items without a position (table columns), keep the whole context.
+    assert laya_inputs(TEXT, {**item, "start": 0, "end": 4})[0].startswith(f'Call transcript: "{TEXT}"')
+    assert long_text in laya_inputs(long_text, {"text": "x", "candidates": candidates})[0]

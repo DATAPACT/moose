@@ -333,6 +333,39 @@ async def run_text_ner(
     return response
 
 
+# Longest piece of text the mention step sees at once. On longer texts the LLM loses track of
+# character offsets and drops mentions, and on a few thousand characters it returns none.
+MENTION_CHUNK_CHARS = 1500
+
+
+def _text_chunks(text: str, size: int = MENTION_CHUNK_CHARS) -> list[tuple[int, str]]:
+    """(offset, piece) windows of at most `size` characters, cut after a paragraph break,
+    else a line break, else a sentence end, else a space; pieces cover the whole text."""
+    chunks: list[tuple[int, str]] = []
+    start = 0
+    while len(text) - start > size:
+        window = text[start : start + size]
+        cut = next((i + len(sep) for sep in ("\n\n", "\n", ". ", " ") if (i := window.rfind(sep)) > size // 3), size)
+        chunks.append((start, text[start : start + cut]))
+        start += cut
+    if start < len(text):
+        chunks.append((start, text[start:]))
+    return chunks
+
+
+async def _find_mentions(text: str, schema: SchemaConfig, llm_client, settings: Settings) -> list[dict[str, Any]]:
+    """The mention step, one call per chunk of the text, with offsets into the whole text."""
+
+    async def one(offset: int, piece: str) -> list[dict[str, Any]]:
+        found = await _run_with_retries(
+            llm_client, build_mention_prompt(schema, piece), lambda raw: _parse_mentions(raw, piece), settings.MOOSE_MAX_RETRIES
+        )
+        return [{**m, "start": m["start"] + offset, "end": m["end"] + offset} for m in found]
+
+    per_chunk = await asyncio.gather(*(one(offset, piece) for offset, piece in _text_chunks(text)))
+    return [m for found in per_chunk for m in found]
+
+
 def _parse_mentions(raw_text: str, text: str) -> list[dict[str, Any]]:
     data = extract_json(raw_text)
     items = data.get("mentions") if isinstance(data, dict) else data
@@ -486,9 +519,7 @@ async def _two_step_text_task(
 ) -> dict:
     """Find and describe mentions, retrieve candidates for each, then choose among them."""
     text = task["text"]
-    mentions = await _run_with_retries(
-        llm_client, build_mention_prompt(schema, text), lambda raw: _parse_mentions(raw, text), settings.MOOSE_MAX_RETRIES
-    )
+    mentions = await _find_mentions(text, schema, llm_client, settings)
     index = candidate_index(schema)
     for mention in mentions:
         mention["candidates"] = index.top_k(f"{mention['category']} {mention['text']}", schema.candidate_k)

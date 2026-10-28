@@ -158,13 +158,28 @@ CPA_PROMPT = Prompt(
 )
 
 
+# Laya reads 512 tokens, the question and options included, and the context comes first: on a
+# longer text the mention and its line are cut off, and every mention of the text gets the same
+# scores. A mention with a position in a longer text is shown with this much text around it.
+LAYA_CONTEXT_CHARS = 800
+
+
+def _laya_context(context: str, item: dict[str, Any]) -> str:
+    start, end = item.get("start"), item.get("end")
+    if len(context) <= LAYA_CONTEXT_CHARS or not isinstance(start, int) or not isinstance(end, int):
+        return context
+    side = max(0, (LAYA_CONTEXT_CHARS - (end - start)) // 2)
+    lo, hi = max(0, start - side), min(len(context), end + side)
+    return ("…" if lo else "") + context[lo:hi] + ("…" if hi < len(context) else "")
+
+
 def laya_inputs(
     context: str, item: dict[str, Any], suggestion: str | None = None, prompt: Prompt = TEXT_PROMPT
 ) -> tuple[str, dict[str, Any]]:
     """Laya's state and question for one item. Candidates keep their retrieval order,
     which Laya uses as a cue (shuffling them lowers its accuracy). `suggestion` is the
     label the LLM chose, given to Laya as evidence."""
-    state = f'{prompt.context_label}: "{context}"\n{prompt.item_label}: "{item["text"]}"'
+    state = f'{prompt.context_label}: "{_laya_context(context, item)}"\n{prompt.item_label}: "{item["text"]}"'
     if item.get("category"):
         state += f' (described as: {item["category"]})'
     if suggestion:
@@ -179,7 +194,7 @@ def laya_inputs(
 def laya_verify_inputs(context: str, item: dict[str, Any], record: dict[str, Any], prompt: Prompt = TEXT_PROMPT) -> tuple[str, dict[str, Any]]:
     """Laya's state and yes/no question for one type: the item alone, with no other
     candidates and nothing about who proposed the type, so Laya judges it on its own."""
-    state = f'{prompt.context_label}: "{context}"\n{prompt.item_label}: "{item["text"]}"'
+    state = f'{prompt.context_label}: "{_laya_context(context, item)}"\n{prompt.item_label}: "{item["text"]}"'
     label = record.get("label") or record["id"]
     definition = _short(record.get("definition"))
     criteria = {"yes": f"Yes, it is {label}" + (f": {definition}" if definition else ""), "no": f"No, it is not {label}"}
