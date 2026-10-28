@@ -1,6 +1,7 @@
 # Design: an anonymisation mode
 
-Status: proposal, not implemented. Nothing below has been run yet.
+Status: step 1 (finding mentions) implemented in `moose.anonymise.find_identifiers`; steps 2-4
+are not.
 
 ## Why
 
@@ -87,7 +88,36 @@ Steps, each checked before the next:
 3. `masked_text`, the API and the docs; unit tests.
 4. Calibration of Laya's verdict on 200 train cases (~$2), then the test split once (~$0.30).
 
-## Decisions needed
+## Step 1 results
+
+TAB dev, the same 15 cases as `dpv_privacy`, every mention found masked (an upper bound on
+recall; deciding what not to mask is step 2). $0.15, none failed.
+
+| | DIRECT recall | QUASI recall | Token precision |
+|---|---|---|---|
+| `dpv_privacy` (personal-data spans) | 0.91 | 0.37 | 0.81 |
+| anonymisation mentions, all masked | 0.93 | 0.95 | 0.52 |
+
+DIRECT and QUASI mentions of each TAB type found:
+
+| Type | Anonymisation | `dpv_privacy` | Category given |
+|---|---|---|---|
+| DATETIME | 296/297 | 38/297 | DATETIME 286, QUANTITY 10 |
+| PERSON | 97/100 | 95/100 | PERSON 97 |
+| CODE | 71/71 | 70/71 | CODE 71 |
+| ORG | 61/65 | 8/65 | ORG 47, LOC 9 |
+| LOC | 49/50 | 7/50 | LOC 48 |
+| QUANTITY | 29/35 | 7/35 | QUANTITY 29 |
+| DEM | 31/45 | 10/45 | DEM 26 |
+| MISC | 21/47 | 12/47 | MISC 9, QUANTITY 6, CODE 4 |
+
+Of the mentions TAB does not mask, 225 of 286 are found too, which is what costs precision:
+step 2 has to leave them unmasked. The weak spots are MISC (injuries and other descriptions)
+and DEM (job titles, ranks).
+
+## Decisions
+
+All four taken as recommended.
 
 1. **A new mode, `moose.anonymise()`, rather than a new schema.** Its output (identifier
    types, entities, masked text) is not a type annotation, so it does not fit `annotate_text`.

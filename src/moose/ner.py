@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, unquote
 
 from moose.candidates import candidate_index
@@ -352,12 +352,13 @@ def _text_chunks(text: str, size: int = MENTION_CHUNK_CHARS) -> list[tuple[int, 
     return chunks
 
 
-async def _find_mentions(text: str, schema: SchemaConfig, llm_client, settings: Settings) -> list[dict[str, Any]]:
-    """The mention step, one call per chunk of the text, with offsets into the whole text."""
+async def _find_mentions(text: str, build_prompt: Callable[[str], str], llm_client, settings: Settings) -> list[dict[str, Any]]:
+    """The mention step, one call per chunk of the text (`build_prompt(chunk)`), with offsets
+    into the whole text."""
 
     async def one(offset: int, piece: str) -> list[dict[str, Any]]:
         found = await _run_with_retries(
-            llm_client, build_mention_prompt(schema, piece), lambda raw: _parse_mentions(raw, piece), settings.MOOSE_MAX_RETRIES
+            llm_client, build_prompt(piece), lambda raw: _parse_mentions(raw, piece), settings.MOOSE_MAX_RETRIES
         )
         return [{**m, "start": m["start"] + offset, "end": m["end"] + offset} for m in found]
 
@@ -531,7 +532,7 @@ async def _two_step_text_task(
 ) -> dict:
     """Find and describe mentions, retrieve candidates for each, then choose among them."""
     text = task["text"]
-    mentions = await _find_mentions(text, schema, llm_client, settings)
+    mentions = await _find_mentions(text, lambda piece: build_mention_prompt(schema, piece), llm_client, settings)
     index = candidate_index(schema)
     for mention in mentions:
         mention["candidates"] = index.top_k(f"{mention['category']} {mention['text']}", schema.candidate_k)
