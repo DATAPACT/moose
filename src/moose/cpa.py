@@ -170,6 +170,12 @@ def _load_schemaorg_subset_indices(subset: str = "curated_v1") -> tuple[dict[str
     return prop_index, class_anc_norm
 
 
+FLATTENED_VALUE_CLASSES = frozenset({
+    "schema:PostalAddress", "schema:GeoCoordinates", "schema:Offer", "schema:AggregateRating", "schema:Rating",
+    "schema:OpeningHoursSpecification",
+})
+
+
 def _filter_schemaorg_predicates_by_domain(
     relation_ids: list[str],
     subject_class: str,
@@ -186,6 +192,11 @@ def _filter_schemaorg_predicates_by_domain(
     prop_index, class_anc = _load_schemaorg_subset_indices(subset=subset)
     allowed_domains = {subject_class}
     allowed_domains.update(class_anc.get(subject_class, []))
+    # Tables often hold the parts of a structured value flat, next to the subject (a business's
+    # postalCode rather than its address): keep the parts' properties when the subject can have one.
+    for meta in prop_index.values():
+        if isinstance(meta, dict) and any(d in allowed_domains for d in meta.get("domains") or []):
+            allowed_domains.update(r for r in meta.get("ranges") or [] if r in FLATTENED_VALUE_CLASSES)
 
     sentinels = set(_sentinel_labels(relation_ids))
     filtered: list[str] = []

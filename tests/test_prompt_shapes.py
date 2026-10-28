@@ -163,3 +163,13 @@ def test_article_rule_keeps_names_and_schema_rules_take_precedence() -> None:
     one_step = build_text_ner_prompt(coarse, [{"task_id": "t", "text": "The Hague"}], ["LOCATION"])
     assert 'unless they are part of a name' in one_step and '"The Hague"' in build_mention_prompt(coarse, "x")
     assert "the schema's rules at the end of this list take precedence" in one_step
+
+
+def test_schemaorg_cpa_keeps_the_parts_of_flattened_values() -> None:
+    from moose.cpa import _filter_schemaorg_predicates_by_domain
+
+    ids = get_schema_config("schemaorg_cpa_v1").load_type_ids()
+    kept = set(_filter_schemaorg_predicates_by_domain(ids, "schema:LocalBusiness"))
+    # A business has an address and a geo location, so their parts are kept; a book's isbn is not.
+    assert {"schema:postalCode", "schema:addressRegion", "schema:latitude", "schema:url"} <= kept
+    assert "schema:isbn" not in kept

@@ -124,7 +124,7 @@
     "type_alias_prefixes": {}
   },
   {
-    "cpa_intro": "You are a column relationship prediction engine. Predict the schema.org property relating the SUBJECT column to each TARGET column. Choose ONLY from the provided labels. If no relationship exists, choose moose:NONE. If a relationship exists but is not represented, choose moose:OTHER.",
+    "cpa_intro": "You are a column relationship prediction engine. Predict the schema.org property relating the SUBJECT column to each TARGET column. Choose ONLY from the provided labels. A target column may hold one part of a structured value of the subject (the region or postal code of its address, the latitude of its location, the price of its offer): choose the property of that part (addressRegion, postalCode, latitude, price), not the property of the whole value (address, geo, offers). If no relationship exists, choose moose:NONE. If a relationship exists but is not represented, choose moose:OTHER.",
     "description": "schema.org predicate CPA using curated_v1 property subset (+ moose:NONE/OTHER).",
     "label": "schema.org CPA (curated_v1)",
     "name": "schemaorg_cpa_v1",
@@ -147,7 +147,7 @@
     "score_mode": "sparse",
     "supports_table": true,
     "supports_text": false,
-    "table_intro": "You are a schema.org class typing engine for tables. Assign one schema.org class per column based on header and sample values. If no class applies, choose moose:OTHER.",
+    "table_intro": "You are a schema.org class typing engine for tables. Assign one schema.org class per column based on header and sample values. A column of names or titles of things (books, people, events, places, businesses, products) gets the class of those things (for example schema:Book, schema:Person, schema:Event), not schema:Text; use data types (schema:Text, schema:Number, schema:Date, schema:URL, ...) only for values that do not name an entity. If no class applies, choose moose:OTHER.",
     "type_alias_prefixes": {
       "http://schema.org/": "schema:",
       "https://schema.org/": "schema:"

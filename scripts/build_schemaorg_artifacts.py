@@ -404,13 +404,15 @@ def build_curated_subset(
     seed_classes: list[str],
     stop_ancestors_at: list[str],
     include_ancestors: bool,
+    property_domains: list[str] | None = None,
 ) -> SchemaOrgArtifacts:
     """
     Curate subset:
       - take seed classes
       - include their descendants
       - optionally include ancestors (but stop at schema:Thing by default)
-      - keep properties whose domain intersects subset classes
+      - keep properties whose domain intersects subset classes or property_domains
+        (classes whose properties are kept without adding their descendants)
       - include range types that appear in selected properties (as classes if present)
     """
     seeds = {normalize_seed(s) for s in seed_classes}
@@ -423,13 +425,14 @@ def build_curated_subset(
         class_subset = closure_ancestors_with_stop(class_subset, artifacts.class_ancestors, stop_at=stop)
 
     # Select properties by domain intersection with class subset
+    property_domain_set = class_subset | {normalize_seed(c) for c in property_domains or []}
     prop_subset: dict[str, dict[str, str]] = {}
     prop_index_subset: dict[str, dict[str, Any]] = {}
     ranges_to_include: set[str] = set()
 
     for pid, meta in artifacts.property_index.items():
         domains = meta.get("domains") or []
-        if any(d in class_subset for d in domains):
+        if any(d in property_domain_set for d in domains):
             prop_subset[pid] = artifacts.properties[pid]
             prop_index_subset[pid] = meta
             for r in meta.get("ranges") or []:
@@ -494,6 +497,14 @@ def main() -> None:
         help="Comma-separated classes where ancestor inclusion stops (do not include these). Default: schema:Thing",
     )
 
+    parser.add_argument(
+        "--property-domains",
+        default="schema:Thing,schema:PostalAddress,schema:GeoCoordinates,schema:Offer,schema:Rating,"
+        "schema:AggregateRating,schema:OpeningHoursSpecification",
+        help="Comma-separated classes whose properties are also kept, e.g. schema:Thing (name, url, "
+        "description) or schema:PostalAddress (streetAddress, postalCode), which tables often hold flattened.",
+    )
+
     # optional LLM seed suggestion
     parser.add_argument(
         "--deepseek-suggest-seeds",
@@ -545,6 +556,7 @@ def main() -> None:
             seed_classes=seed_classes,
             stop_ancestors_at=stop_ancestors_at,
             include_ancestors=bool(args.include_ancestors),
+            property_domains=[s.strip() for s in args.property_domains.split(",") if s.strip()],
         )
 
         subset_dir = out_dir / "subsets" / args.subset_name
@@ -553,6 +565,12 @@ def main() -> None:
         write_json(subset_dir / "property_index.json", dict(sorted(subset.property_index.items())))
         write_json(subset_dir / "class_parents.json", dict(sorted(subset.class_parents.items())))
         write_json(subset_dir / "class_ancestors.json", dict(sorted(subset.class_ancestors.items())))
+        # The label sets of the schemaorg_cta_v1 / schemaorg_cpa_v1 schemas, with Moose's sentinels.
+        write_json(subset_dir / "cta_labels.json",
+                   [{"id": "moose:OTHER", "iri": None, "label": "Other / Unknown Class"}, *to_sorted_list(subset.classes)])
+        write_json(subset_dir / "cpa_labels.json",
+                   [{"id": "moose:NONE", "iri": None, "label": "No Relationship"},
+                    {"id": "moose:OTHER", "iri": None, "label": "Other Relationship"}, *to_sorted_list(subset.properties)])
 
         print("Wrote curated subset:")
         print(f"  subset_dir:  {subset_dir}")

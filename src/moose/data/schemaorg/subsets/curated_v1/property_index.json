@@ -327,6 +327,17 @@
       "schema:Person"
     ]
   },
+  "schema:addOn": {
+    "domains": [
+      "schema:Offer"
+    ],
+    "id": "schema:addOn",
+    "iri": "https://schema.org/addOn",
+    "label": "addOn",
+    "ranges": [
+      "schema:Offer"
+    ]
+  },
   "schema:additionalName": {
     "domains": [
       "schema:Person"
@@ -352,6 +363,18 @@
     "label": "additionalProperty",
     "ranges": [
       "schema:PropertyValue"
+    ]
+  },
+  "schema:additionalType": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:additionalType",
+    "iri": "https://schema.org/additionalType",
+    "label": "additionalType",
+    "ranges": [
+      "schema:URL",
+      "schema:Text"
     ]
   },
   "schema:additionalVariable": {
@@ -396,6 +419,17 @@
       "schema:Text"
     ]
   },
+  "schema:addressLocality": {
+    "domains": [
+      "schema:PostalAddress"
+    ],
+    "id": "schema:addressLocality",
+    "iri": "https://schema.org/addressLocality",
+    "label": "addressLocality",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
   "schema:addressRegion": {
     "domains": [
       "schema:DefinedRegion",
@@ -418,6 +452,18 @@
     "label": "administrationRoute",
     "ranges": [
       "schema:Text"
+    ]
+  },
+  "schema:advanceBookingRequirement": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:advanceBookingRequirement",
+    "iri": "https://schema.org/advanceBookingRequirement",
+    "label": "advanceBookingRequirement",
+    "ranges": [
+      "schema:QuantitativeValue"
     ]
   },
   "schema:affiliation": {
@@ -546,6 +592,17 @@
     "id": "schema:alcoholWarning",
     "iri": "https://schema.org/alcoholWarning",
     "label": "alcoholWarning",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
+  "schema:alternateName": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:alternateName",
+    "iri": "https://schema.org/alternateName",
+    "label": "alternateName",
     "ranges": [
       "schema:Text"
     ]
@@ -1038,6 +1095,72 @@
       "schema:Person"
     ]
   },
+  "schema:availability": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:availability",
+    "iri": "https://schema.org/availability",
+    "label": "availability",
+    "ranges": [
+      "schema:ItemAvailability"
+    ]
+  },
+  "schema:availabilityEnds": {
+    "domains": [
+      "schema:ActionAccessSpecification",
+      "schema:Offer",
+      "schema:Demand"
+    ],
+    "id": "schema:availabilityEnds",
+    "iri": "https://schema.org/availabilityEnds",
+    "label": "availabilityEnds",
+    "ranges": [
+      "schema:DateTime",
+      "schema:Date",
+      "schema:Time"
+    ]
+  },
+  "schema:availabilityStarts": {
+    "domains": [
+      "schema:ActionAccessSpecification",
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:availabilityStarts",
+    "iri": "https://schema.org/availabilityStarts",
+    "label": "availabilityStarts",
+    "ranges": [
+      "schema:DateTime",
+      "schema:Date",
+      "schema:Time"
+    ]
+  },
+  "schema:availableAtOrFrom": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:availableAtOrFrom",
+    "iri": "https://schema.org/availableAtOrFrom",
+    "label": "availableAtOrFrom",
+    "ranges": [
+      "schema:Place"
+    ]
+  },
+  "schema:availableDeliveryMethod": {
+    "domains": [
+      "schema:Offer",
+      "schema:Demand"
+    ],
+    "id": "schema:availableDeliveryMethod",
+    "iri": "https://schema.org/availableDeliveryMethod",
+    "label": "availableDeliveryMethod",
+    "ranges": [
+      "schema:DeliveryMethod"
+    ]
+  },
   "schema:availableFrom": {
     "domains": [
       "schema:DeliveryEvent"
@@ -1215,6 +1338,18 @@
     "ranges": [
       "schema:MediaObject",
       "schema:URL"
+    ]
+  },
+  "schema:bestRating": {
+    "domains": [
+      "schema:Rating"
+    ],
+    "id": "schema:bestRating",
+    "iri": "https://schema.org/bestRating",
+    "label": "bestRating",
+    "ranges": [
+      "schema:Text",
+      "schema:Number"
     ]
   },
   "schema:birthDate": {
@@ -1399,6 +1534,19 @@
     "label": "browserRequirements",
     "ranges": [
       "schema:Text"
+    ]
+  },
+  "schema:businessFunction": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer",
+      "schema:TypeAndQuantityNode"
+    ],
+    "id": "schema:businessFunction",
+    "iri": "https://schema.org/businessFunction",
+    "label": "businessFunction",
+    "ranges": [
+      "schema:BusinessFunction"
     ]
   },
   "schema:byArtist": {
@@ -1603,6 +1751,17 @@
       "schema:Time"
     ]
   },
+  "schema:checkoutPageURLTemplate": {
+    "domains": [
+      "schema:Offer"
+    ],
+    "id": "schema:checkoutPageURLTemplate",
+    "iri": "https://schema.org/checkoutPageURLTemplate",
+    "label": "checkoutPageURLTemplate",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
   "schema:checkoutTime": {
     "domains": [
       "schema:LodgingBusiness",
@@ -1694,6 +1853,17 @@
     "ranges": [
       "schema:Text",
       "schema:Integer"
+    ]
+  },
+  "schema:closes": {
+    "domains": [
+      "schema:OpeningHoursSpecification"
+    ],
+    "id": "schema:closes",
+    "iri": "https://schema.org/closes",
+    "label": "closes",
+    "ranges": [
+      "schema:Time"
     ]
   },
   "schema:coach": {
@@ -2508,6 +2678,18 @@
       "schema:Text"
     ]
   },
+  "schema:dayOfWeek": {
+    "domains": [
+      "schema:EducationalOccupationalProgram",
+      "schema:OpeningHoursSpecification"
+    ],
+    "id": "schema:dayOfWeek",
+    "iri": "https://schema.org/dayOfWeek",
+    "label": "dayOfWeek",
+    "ranges": [
+      "schema:DayOfWeek"
+    ]
+  },
   "schema:deathDate": {
     "domains": [
       "schema:Person"
@@ -2528,6 +2710,18 @@
     "label": "deathPlace",
     "ranges": [
       "schema:Place"
+    ]
+  },
+  "schema:deliveryLeadTime": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:deliveryLeadTime",
+    "iri": "https://schema.org/deliveryLeadTime",
+    "label": "deliveryLeadTime",
+    "ranges": [
+      "schema:QuantitativeValue"
     ]
   },
   "schema:department": {
@@ -2565,6 +2759,18 @@
     "ranges": [
       "schema:Distance",
       "schema:QuantitativeValue"
+    ]
+  },
+  "schema:description": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:description",
+    "iri": "https://schema.org/description",
+    "label": "description",
+    "ranges": [
+      "schema:TextObject",
+      "schema:Text"
     ]
   },
   "schema:device": {
@@ -2650,6 +2856,17 @@
     "label": "directors",
     "ranges": [
       "schema:Person"
+    ]
+  },
+  "schema:disambiguatingDescription": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:disambiguatingDescription",
+    "iri": "https://schema.org/disambiguatingDescription",
+    "label": "disambiguatingDescription",
+    "ranges": [
+      "schema:Text"
     ]
   },
   "schema:discusses": {
@@ -2999,6 +3216,85 @@
     "ranges": [
       "schema:Text",
       "schema:DefinedTerm"
+    ]
+  },
+  "schema:elevation": {
+    "domains": [
+      "schema:GeoShape",
+      "schema:GeoCoordinates"
+    ],
+    "id": "schema:elevation",
+    "iri": "https://schema.org/elevation",
+    "label": "elevation",
+    "ranges": [
+      "schema:Number",
+      "schema:Text"
+    ]
+  },
+  "schema:eligibleCustomerType": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:eligibleCustomerType",
+    "iri": "https://schema.org/eligibleCustomerType",
+    "label": "eligibleCustomerType",
+    "ranges": [
+      "schema:BusinessEntityType"
+    ]
+  },
+  "schema:eligibleDuration": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:eligibleDuration",
+    "iri": "https://schema.org/eligibleDuration",
+    "label": "eligibleDuration",
+    "ranges": [
+      "schema:QuantitativeValue"
+    ]
+  },
+  "schema:eligibleQuantity": {
+    "domains": [
+      "schema:Demand",
+      "schema:PriceSpecification",
+      "schema:Offer"
+    ],
+    "id": "schema:eligibleQuantity",
+    "iri": "https://schema.org/eligibleQuantity",
+    "label": "eligibleQuantity",
+    "ranges": [
+      "schema:QuantitativeValue"
+    ]
+  },
+  "schema:eligibleRegion": {
+    "domains": [
+      "schema:DeliveryChargeSpecification",
+      "schema:Offer",
+      "schema:Demand",
+      "schema:ActionAccessSpecification"
+    ],
+    "id": "schema:eligibleRegion",
+    "iri": "https://schema.org/eligibleRegion",
+    "label": "eligibleRegion",
+    "ranges": [
+      "schema:GeoShape",
+      "schema:Text",
+      "schema:Place"
+    ]
+  },
+  "schema:eligibleTransactionVolume": {
+    "domains": [
+      "schema:PriceSpecification",
+      "schema:Offer",
+      "schema:Demand"
+    ],
+    "id": "schema:eligibleTransactionVolume",
+    "iri": "https://schema.org/eligibleTransactionVolume",
+    "label": "eligibleTransactionVolume",
+    "ranges": [
+      "schema:PriceSpecification"
     ]
   },
   "schema:email": {
@@ -3384,6 +3680,17 @@
     "ranges": [
       "schema:DateTime",
       "schema:Date"
+    ]
+  },
+  "schema:extendedAddress": {
+    "domains": [
+      "schema:PostalAddress"
+    ],
+    "id": "schema:extendedAddress",
+    "iri": "https://schema.org/extendedAddress",
+    "label": "extendedAddress",
+    "ranges": [
+      "schema:Text"
     ]
   },
   "schema:familyName": {
@@ -4543,6 +4850,19 @@
       "schema:Text"
     ]
   },
+  "schema:identifier": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:identifier",
+    "iri": "https://schema.org/identifier",
+    "label": "identifier",
+    "ranges": [
+      "schema:URL",
+      "schema:PropertyValue",
+      "schema:Text"
+    ]
+  },
   "schema:illustrator": {
     "domains": [
       "schema:Book"
@@ -4552,6 +4872,18 @@
     "label": "illustrator",
     "ranges": [
       "schema:Person"
+    ]
+  },
+  "schema:image": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:image",
+    "iri": "https://schema.org/image",
+    "label": "image",
+    "ranges": [
+      "schema:ImageObject",
+      "schema:URL"
     ]
   },
   "schema:inAlbum": {
@@ -5171,6 +5503,24 @@
       "schema:Text"
     ]
   },
+  "schema:itemOffered": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:itemOffered",
+    "iri": "https://schema.org/itemOffered",
+    "label": "itemOffered",
+    "ranges": [
+      "schema:Product",
+      "schema:Event",
+      "schema:AggregateOffer",
+      "schema:Trip",
+      "schema:CreativeWork",
+      "schema:Service",
+      "schema:MenuItem"
+    ]
+  },
   "schema:itemReviewed": {
     "domains": [
       "schema:Review",
@@ -5770,6 +6120,18 @@
       "schema:Thing"
     ]
   },
+  "schema:mainEntityOfPage": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:mainEntityOfPage",
+    "iri": "https://schema.org/mainEntityOfPage",
+    "label": "mainEntityOfPage",
+    "ranges": [
+      "schema:CreativeWork",
+      "schema:URL"
+    ]
+  },
   "schema:maintainer": {
     "domains": [
       "schema:CreativeWork"
@@ -6303,6 +6665,17 @@
       "schema:Text"
     ]
   },
+  "schema:name": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:name",
+    "iri": "https://schema.org/name",
+    "label": "name",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
   "schema:nationality": {
     "domains": [
       "schema:Person"
@@ -6716,6 +7089,18 @@
       "schema:Text"
     ]
   },
+  "schema:offeredBy": {
+    "domains": [
+      "schema:Offer"
+    ],
+    "id": "schema:offeredBy",
+    "iri": "https://schema.org/offeredBy",
+    "label": "offeredBy",
+    "ranges": [
+      "schema:Person",
+      "schema:Organization"
+    ]
+  },
   "schema:offers": {
     "domains": [
       "schema:Service",
@@ -6756,6 +7141,17 @@
     "label": "openingHoursSpecification",
     "ranges": [
       "schema:OpeningHoursSpecification"
+    ]
+  },
+  "schema:opens": {
+    "domains": [
+      "schema:OpeningHoursSpecification"
+    ],
+    "id": "schema:opens",
+    "iri": "https://schema.org/opens",
+    "label": "opens",
+    "ranges": [
+      "schema:Time"
     ]
   },
   "schema:operatingSystem": {
@@ -6815,6 +7211,18 @@
     "label": "overdosage",
     "ranges": [
       "schema:Text"
+    ]
+  },
+  "schema:owner": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:owner",
+    "iri": "https://schema.org/owner",
+    "label": "owner",
+    "ranges": [
+      "schema:Person",
+      "schema:Organization"
     ]
   },
   "schema:ownershipFundingInfo": {
@@ -7214,6 +7622,17 @@
       "schema:ItemList"
     ]
   },
+  "schema:postOfficeBoxNumber": {
+    "domains": [
+      "schema:PostalAddress"
+    ],
+    "id": "schema:postOfficeBoxNumber",
+    "iri": "https://schema.org/postOfficeBoxNumber",
+    "label": "postOfficeBoxNumber",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
   "schema:postalCode": {
     "domains": [
       "schema:PostalAddress",
@@ -7248,6 +7667,17 @@
     "label": "postalCodeRange",
     "ranges": [
       "schema:PostalCodeRangeSpecification"
+    ]
+  },
+  "schema:potentialAction": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:potentialAction",
+    "iri": "https://schema.org/potentialAction",
+    "label": "potentialAction",
+    "ranges": [
+      "schema:Action"
     ]
   },
   "schema:practicesAt": {
@@ -7351,6 +7781,37 @@
       "schema:Date"
     ]
   },
+  "schema:price": {
+    "domains": [
+      "schema:PriceSpecification",
+      "schema:Offer",
+      "schema:DonateAction",
+      "schema:TradeAction"
+    ],
+    "id": "schema:price",
+    "iri": "https://schema.org/price",
+    "label": "price",
+    "ranges": [
+      "schema:Number",
+      "schema:Text"
+    ]
+  },
+  "schema:priceCurrency": {
+    "domains": [
+      "schema:Offer",
+      "schema:Ticket",
+      "schema:TradeAction",
+      "schema:Reservation",
+      "schema:DonateAction",
+      "schema:PriceSpecification"
+    ],
+    "id": "schema:priceCurrency",
+    "iri": "https://schema.org/priceCurrency",
+    "label": "priceCurrency",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
   "schema:priceRange": {
     "domains": [
       "schema:LocalBusiness"
@@ -7360,6 +7821,31 @@
     "label": "priceRange",
     "ranges": [
       "schema:Text"
+    ]
+  },
+  "schema:priceSpecification": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer",
+      "schema:DonateAction",
+      "schema:TradeAction"
+    ],
+    "id": "schema:priceSpecification",
+    "iri": "https://schema.org/priceSpecification",
+    "label": "priceSpecification",
+    "ranges": [
+      "schema:PriceSpecification"
+    ]
+  },
+  "schema:priceValidUntil": {
+    "domains": [
+      "schema:Offer"
+    ],
+    "id": "schema:priceValidUntil",
+    "iri": "https://schema.org/priceValidUntil",
+    "label": "priceValidUntil",
+    "ranges": [
+      "schema:Date"
     ]
   },
   "schema:primaryImageOfPage": {
@@ -7711,6 +8197,40 @@
     "label": "quest",
     "ranges": [
       "schema:Thing"
+    ]
+  },
+  "schema:ratingCount": {
+    "domains": [
+      "schema:AggregateRating"
+    ],
+    "id": "schema:ratingCount",
+    "iri": "https://schema.org/ratingCount",
+    "label": "ratingCount",
+    "ranges": [
+      "schema:Integer"
+    ]
+  },
+  "schema:ratingExplanation": {
+    "domains": [
+      "schema:Rating"
+    ],
+    "id": "schema:ratingExplanation",
+    "iri": "https://schema.org/ratingExplanation",
+    "label": "ratingExplanation",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
+  "schema:ratingValue": {
+    "domains": [
+      "schema:Rating"
+    ],
+    "id": "schema:ratingValue",
+    "iri": "https://schema.org/ratingValue",
+    "label": "ratingValue",
+    "ranges": [
+      "schema:Number",
+      "schema:Text"
     ]
   },
   "schema:readBy": {
@@ -8174,6 +8694,17 @@
       "schema:Text"
     ]
   },
+  "schema:reviewCount": {
+    "domains": [
+      "schema:AggregateRating"
+    ],
+    "id": "schema:reviewCount",
+    "iri": "https://schema.org/reviewCount",
+    "label": "reviewCount",
+    "ranges": [
+      "schema:Integer"
+    ]
+  },
   "schema:reviewRating": {
     "domains": [
       "schema:Review"
@@ -8279,6 +8810,17 @@
     "label": "safetyConsideration",
     "ranges": [
       "schema:Text"
+    ]
+  },
+  "schema:sameAs": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:sameAs",
+    "iri": "https://schema.org/sameAs",
+    "label": "sameAs",
+    "ranges": [
+      "schema:URL"
     ]
   },
   "schema:sampleType": {
@@ -8437,6 +8979,22 @@
       "schema:Demand"
     ]
   },
+  "schema:seller": {
+    "domains": [
+      "schema:Offer",
+      "schema:BuyAction",
+      "schema:Flight",
+      "schema:Order",
+      "schema:Demand"
+    ],
+    "id": "schema:seller",
+    "iri": "https://schema.org/seller",
+    "label": "seller",
+    "ranges": [
+      "schema:Person",
+      "schema:Organization"
+    ]
+  },
   "schema:sender": {
     "domains": [
       "schema:ReceiveAction",
@@ -8511,6 +9069,17 @@
     "label": "sharedContent",
     "ranges": [
       "schema:CreativeWork"
+    ]
+  },
+  "schema:shippingDetails": {
+    "domains": [
+      "schema:Offer"
+    ],
+    "id": "schema:shippingDetails",
+    "iri": "https://schema.org/shippingDetails",
+    "label": "shippingDetails",
+    "ranges": [
+      "schema:OfferShippingDetails"
     ]
   },
   "schema:sibling": {
@@ -8915,6 +9484,17 @@
       "schema:Text"
     ]
   },
+  "schema:streetAddress": {
+    "domains": [
+      "schema:PostalAddress"
+    ],
+    "id": "schema:streetAddress",
+    "iri": "https://schema.org/streetAddress",
+    "label": "streetAddress",
+    "ranges": [
+      "schema:Text"
+    ]
+  },
   "schema:study": {
     "domains": [
       "schema:MedicalEntity"
@@ -8957,6 +9537,18 @@
     "label": "subOrganization",
     "ranges": [
       "schema:Organization"
+    ]
+  },
+  "schema:subjectOf": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:subjectOf",
+    "iri": "https://schema.org/subjectOf",
+    "label": "subjectOf",
+    "ranges": [
+      "schema:Event",
+      "schema:CreativeWork"
     ]
   },
   "schema:subtitleLanguage": {
@@ -9555,6 +10147,17 @@
       "schema:Integer"
     ]
   },
+  "schema:url": {
+    "domains": [
+      "schema:Thing"
+    ],
+    "id": "schema:url",
+    "iri": "https://schema.org/url",
+    "label": "url",
+    "ranges": [
+      "schema:URL"
+    ]
+  },
   "schema:usNPI": {
     "domains": [
       "schema:Physician"
@@ -9601,6 +10204,21 @@
       "schema:Duration"
     ]
   },
+  "schema:validForMemberTier": {
+    "domains": [
+      "schema:MerchantReturnPolicy",
+      "schema:Offer",
+      "schema:OfferShippingDetails",
+      "schema:ShippingService",
+      "schema:PriceSpecification"
+    ],
+    "id": "schema:validForMemberTier",
+    "iri": "https://schema.org/validForMemberTier",
+    "label": "validForMemberTier",
+    "ranges": [
+      "schema:MemberProgramTier"
+    ]
+  },
   "schema:validFrom": {
     "domains": [
       "schema:FinancialIncentive",
@@ -9632,6 +10250,25 @@
     "label": "validIn",
     "ranges": [
       "schema:AdministrativeArea"
+    ]
+  },
+  "schema:validThrough": {
+    "domains": [
+      "schema:LocationFeatureSpecification",
+      "schema:PriceSpecification",
+      "schema:Offer",
+      "schema:OpeningHoursSpecification",
+      "schema:MonetaryAmount",
+      "schema:JobPosting",
+      "schema:Demand",
+      "schema:FinancialIncentive"
+    ],
+    "id": "schema:validThrough",
+    "iri": "https://schema.org/validThrough",
+    "label": "validThrough",
+    "ranges": [
+      "schema:DateTime",
+      "schema:Date"
     ]
   },
   "schema:variableMeasured": {
@@ -9882,6 +10519,18 @@
       "schema:Text"
     ]
   },
+  "schema:warranty": {
+    "domains": [
+      "schema:Demand",
+      "schema:Offer"
+    ],
+    "id": "schema:warranty",
+    "iri": "https://schema.org/warranty",
+    "label": "warranty",
+    "ranges": [
+      "schema:WarrantyPromise"
+    ]
+  },
   "schema:webFeed": {
     "domains": [
       "schema:PodcastSeries",
@@ -10049,6 +10698,18 @@
     "label": "worksFor",
     "ranges": [
       "schema:Organization"
+    ]
+  },
+  "schema:worstRating": {
+    "domains": [
+      "schema:Rating"
+    ],
+    "id": "schema:worstRating",
+    "iri": "https://schema.org/worstRating",
+    "label": "worstRating",
+    "ranges": [
+      "schema:Text",
+      "schema:Number"
     ]
   },
   "schema:xpath": {
