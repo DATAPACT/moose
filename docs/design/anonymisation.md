@@ -133,7 +133,26 @@ applications' numbers, cities, nationalities and injuries; only the state, its n
 bodies, international institutions and legal references stayed. The rules now say so. Cost:
 about $0.014 per case, $0.010 to find mentions and $0.004 to decide.
 
-Not tuned further on these 15 cases. Before step 3, the next check is TAB's test split once.
+Not tuned further on these 15 cases.
+
+### Test split
+
+The 30 random test cases `dpv_privacy` was tested on (seed 0), run once with the rules
+above, protecting the applicant; none failed, $0.43.
+
+| | DIRECT recall | QUASI recall | Token precision | Mention precision |
+|---|---|---|---|---|
+| `dpv_privacy` (personal-data spans) | 0.85 | 0.35 | 0.79 | 0.80 |
+| `moose.anonymise`, masked | 0.98 | 0.75 | 0.82 | 0.78 |
+| `moose.anonymise`, every mention found masked | 0.98 | 0.94 | 0.48 | 0.47 |
+
+Mentions found per type: DATETIME 525/526, PERSON 242/243, CODE 82/82, QUANTITY 34/35, LOC
+77/80, ORG 100/105, DEM 64/81, MISC 21/37. The decision, not the search, is where QUASI
+recall is lost; MISC (injuries and other descriptions) is the weak spot of the search.
+
+One case failed at first: on an ordinary paragraph the LLM reasoned until its 40,000-token
+limit and answered nothing. The mention step now splits such a chunk in two and tries each
+half (`moose.ner.MIN_SPLIT_CHARS`), for every two-step schema, not only here.
 
 ## Decisions
 

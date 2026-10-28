@@ -8,6 +8,7 @@ from urllib.parse import quote, unquote
 
 from moose.candidates import candidate_index
 from moose.config import Settings, get_settings
+from moose.llm.base import EmptyResponse
 from moose.linkers import (
     CELL_PROMPT,
     SYSTEM1_LINKERS,
@@ -335,6 +336,9 @@ async def run_text_ner(
 # Longest piece of text the mention step sees at once. On longer texts the LLM loses track of
 # character offsets and drops mentions, and on a few thousand characters it returns none.
 MENTION_CHUNK_CHARS = 1500
+# A chunk the LLM answers nothing for (it can reason until its output limit on ordinary text)
+# is split in two and each half tried again, down to this size.
+MIN_SPLIT_CHARS = 300
 
 
 def _text_chunks(text: str, size: int = MENTION_CHUNK_CHARS) -> list[tuple[int, str]]:
@@ -357,9 +361,15 @@ async def _find_mentions(text: str, build_prompt: Callable[[str], str], llm_clie
     into the whole text."""
 
     async def one(offset: int, piece: str) -> list[dict[str, Any]]:
-        found = await _run_with_retries(
-            llm_client, build_prompt(piece), lambda raw: _parse_mentions(raw, piece), settings.MOOSE_MAX_RETRIES
-        )
+        try:
+            found = await _run_with_retries(
+                llm_client, build_prompt(piece), lambda raw: _parse_mentions(raw, piece), settings.MOOSE_MAX_RETRIES
+            )
+        except EmptyResponse:
+            if len(piece) < 2 * MIN_SPLIT_CHARS:
+                raise
+            halves = await asyncio.gather(*(one(offset + o, p) for o, p in _text_chunks(piece, len(piece) // 2 + 1)))
+            return [m for half in halves for m in half]
         return [{**m, "start": m["start"] + offset, "end": m["end"] + offset} for m in found]
 
     per_chunk = await asyncio.gather(*(one(offset, piece) for offset, piece in _text_chunks(text)))
