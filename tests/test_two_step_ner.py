@@ -535,3 +535,16 @@ def test_the_mention_prompt_asks_for_text_in_order_not_offsets() -> None:
     prompt = build_mention_prompt(get_schema_config("dpv_privacy"), "We collect email addresses.")
     assert '"start"' not in prompt and "do not give character offsets" in prompt
     assert "in the order they appear" in prompt
+
+
+def test_every_repeat_in_a_long_text_gets_its_own_span() -> None:
+    from moose.ner import _Spans, _parse_mentions
+
+    text = "Mr Rossi met Ms Bianchi in Milan. " * 2000
+    raw = json.dumps({"mentions": [{"text": t} for _ in range(2000) for t in ("Mr Rossi", "Ms Bianchi", "Milan")]})
+    mentions = _parse_mentions(raw, text)
+    assert len(mentions) == 6000 and len({m["start"] for m in mentions}) == 6000
+    spans = _Spans()
+    spans.add(10, 20)
+    spans.add(30, 40)
+    assert spans.free(20, 30) and not spans.free(15, 25) and not spans.free(5, 11) and spans.free(0, 10)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import json
 import re
 from typing import Any
@@ -365,14 +366,38 @@ async def _find_mentions(text: str, schema: SchemaConfig, llm_client, settings: 
     return [m for found in per_chunk for m in found]
 
 
-def _locate(text: str, span: str, after: int, taken: list[dict[str, Any]]) -> tuple[int, int] | None:
+class _Spans:
+    """Non-overlapping spans placed so far, sorted, for overlap checks in O(log n)."""
+
+    def __init__(self) -> None:
+        self.starts: list[int] = []
+        self.ends: list[int] = []
+
+    def free(self, start: int, end: int) -> bool:
+        # The spans do not overlap, so their ends are sorted too: only the last span that
+        # starts before `end` can overlap [start, end).
+        i = bisect.bisect_left(self.starts, end)
+        return i == 0 or self.ends[i - 1] <= start
+
+    def add(self, start: int, end: int) -> None:
+        i = bisect.bisect_left(self.starts, start)
+        self.starts.insert(i, start)
+        self.ends.insert(i, end)
+
+
+def _locate(text: str, span: str, after: int, taken: _Spans) -> tuple[int, int] | None:
     """Where `span` occurs: the first occurrence from `after` on that overlaps no mention
-    already placed, else the first such occurrence anywhere."""
+    already placed, else the first such occurrence before it."""
     span = span.strip()
-    starts = [i for i in range(len(text)) if text.startswith(span, i)] if span else []
-    free = [i for i in starts if not any(i < m["end"] and m["start"] < i + len(span) for m in taken)]
-    best = next((i for i in free if i >= after), free[0] if free else None)
-    return None if best is None else (best, best + len(span))
+    if not span:
+        return None
+    for origin, stop in ((after, len(text)), (0, after)):
+        i = text.find(span, origin)
+        while i != -1 and i < stop:
+            if taken.free(i, i + len(span)):
+                return i, i + len(span)
+            i = text.find(span, i + 1)
+    return None
 
 
 def _parse_mentions(raw_text: str, text: str) -> list[dict[str, Any]]:
@@ -383,18 +408,20 @@ def _parse_mentions(raw_text: str, text: str) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         raise ValueError('Expected {"mentions": [...]}.')
     mentions: list[dict[str, Any]] = []
+    taken = _Spans()
     cursor = 0
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not item["text"].strip():
             raise ValueError('Each mention needs a non-empty "text".')
         start, end = item.get("start"), item.get("end")
         exact = isinstance(start, int) and isinstance(end, int) and text[start:end] == item["text"]
-        if not exact or any(start < m["end"] and m["start"] < end for m in mentions):
-            placed = _locate(text, item["text"], cursor, mentions)
+        if not exact or not taken.free(start, end):
+            placed = _locate(text, item["text"], cursor, taken)
             if placed is None:
                 continue  # not a substring of the input, or every occurrence is taken: drop it
             start, end = placed
         cursor = end
+        taken.add(start, end)
         category = item.get("category")
         mentions.append({
             "start": start,
