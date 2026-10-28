@@ -377,8 +377,8 @@ column and the target column <relation>?", "Is the mention <type>?"). In privacy
 items without a probability (no Laya on the server) are kept and flagged low-confidence.
 
 The API image includes Laya by default (`MOOSE_EXTRAS=laya`, CPU PyTorch, about 1 GB). Its
-model, about 800 MB, downloads into a Docker volume on first use. `MOOSE_LAYA_MODEL` points
-to another checkpoint.
+model, about 800 MB, downloads into a Docker volume on first use, and runs on a GPU when one
+is available. A schema uses another checkpoint through its `linker_calibration` file.
 
 Any schema can use this mode through its registry entry:
 - `"candidate_mode": "two_step"`;

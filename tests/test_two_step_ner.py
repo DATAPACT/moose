@@ -149,7 +149,7 @@ def _use_laya(monkeypatch: pytest.MonkeyPatch, tmp_path, fake: _FakeLaya, consul
     import moose.ner as ner_module
 
     path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"consult_below": consult_below}))
+    path.write_text(json.dumps({"consult_below": consult_below, "validated_for": ["text"]}))
     schema = dataclasses.replace(get_schema_config("dpv_privacy"), linker_calibration=path)
     monkeypatch.setattr(ner_module, "get_schema_config", lambda name: schema)
     async def get_fake(model):
@@ -391,17 +391,15 @@ def test_dpv_annotates_in_two_steps_with_the_llm_deciding() -> None:
     assert (dpv.candidate_mode, dpv.linker) == ("two_step", "llm") and two_step_active(dpv)
 
 
-def test_a_calibration_can_name_its_own_model_override(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_the_model_comes_from_the_calibration_file_only(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     from moose.linkers import Calibration
 
     path = tmp_path / "calibration.json"
-    path.write_text(json.dumps({"model": "org/fine-tuned", "model_env": "MOOSE_LAYA_DPV_MODEL"}))
-    monkeypatch.setenv("MOOSE_LAYA_MODEL", "/base")
-    assert Calibration.load(path).model == "org/fine-tuned"  # the general override does not apply
-    monkeypatch.setenv("MOOSE_LAYA_DPV_MODEL", "/local/fine-tuned")
-    assert Calibration.load(path).model == "/local/fine-tuned"
-    # Schemas without their own variable follow MOOSE_LAYA_MODEL.
-    assert Calibration.load(get_schema_config("dpv_privacy").linker_calibration).model == "/base"
+    path.write_text(json.dumps({"model": "org/fine-tuned"}))
+    monkeypatch.setenv("MOOSE_LAYA_MODEL", "/elsewhere")  # no longer read
+    cal = Calibration.load(path)
+    # Another model needs its own file, whose probabilities are not calibrated until checked.
+    assert cal.model == "org/fine-tuned" and cal.validated_tasks("system1") == ()
 
 
 @pytest.mark.asyncio
