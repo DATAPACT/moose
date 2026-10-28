@@ -26,6 +26,9 @@
     "schema:Thing",
     "schema:Organization"
   ],
+  "schema:Action": [
+    "schema:Thing"
+  ],
   "schema:AdministrativeArea": [
     "schema:Place",
     "schema:Thing"
@@ -41,6 +44,11 @@
   "schema:AdvertiserContentArticle": [
     "schema:Article",
     "schema:CreativeWork",
+    "schema:Thing"
+  ],
+  "schema:AggregateOffer": [
+    "schema:Offer",
+    "schema:Intangible",
     "schema:Thing"
   ],
   "schema:AggregateRating": [
@@ -395,10 +403,12 @@
     "schema:Place",
     "schema:Thing"
   ],
+  "schema:BusinessEntityType": [],
   "schema:BusinessEvent": [
     "schema:Event",
     "schema:Thing"
   ],
+  "schema:BusinessFunction": [],
   "schema:CDCPMDRecord": [
     "schema:StructuredValue",
     "schema:Intangible",
@@ -746,6 +756,7 @@
   ],
   "schema:Date": [],
   "schema:DateTime": [],
+  "schema:DayOfWeek": [],
   "schema:DaySpa": [
     "schema:HealthAndBeautyBusiness",
     "schema:LocalBusiness",
@@ -1371,6 +1382,7 @@
     "schema:Thing",
     "schema:Organization"
   ],
+  "schema:ItemAvailability": [],
   "schema:ItemList": [
     "schema:Intangible",
     "schema:Thing"
@@ -1894,6 +1906,11 @@
     "schema:Thing"
   ],
   "schema:OfferItemCondition": [],
+  "schema:OfferShippingDetails": [
+    "schema:StructuredValue",
+    "schema:Intangible",
+    "schema:Thing"
+  ],
   "schema:OfficeEquipmentStore": [
     "schema:Store",
     "schema:LocalBusiness",
@@ -2539,7 +2556,10 @@
     "schema:CreativeWork",
     "schema:Thing"
   ],
-  "schema:SolveMathAction": [],
+  "schema:SolveMathAction": [
+    "schema:Action",
+    "schema:Thing"
+  ],
   "schema:SomeProducts": [
     "schema:Product",
     "schema:Thing"
@@ -2773,6 +2793,10 @@
     "schema:Thing",
     "schema:Organization"
   ],
+  "schema:Trip": [
+    "schema:Intangible",
+    "schema:Thing"
+  ],
   "schema:TypeAndQuantityNode": [
     "schema:StructuredValue",
     "schema:Intangible",
@@ -2922,6 +2946,11 @@
   "schema:WPSideBar": [
     "schema:WebPageElement",
     "schema:CreativeWork",
+    "schema:Thing"
+  ],
+  "schema:WarrantyPromise": [
+    "schema:StructuredValue",
+    "schema:Intangible",
     "schema:Thing"
   ],
   "schema:Waterfall": [

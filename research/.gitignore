@@ -4,3 +4,5 @@ models/
 DPVCallBench/
 dpv_eval/runs/
 dpv_eval/colab/
+sotab_eval/data/
+sotab_eval/runs/

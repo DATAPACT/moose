@@ -91,3 +91,39 @@ def test_cell_outputs_without_table_id_match_by_row_and_column() -> None:
     clash = [dict(tasks[0]), {**tasks[1], "column": "name"}]
     with pytest.raises(ValueError, match="Unknown cell"):
         _coerce_cell_ner_output_with_task_ids(json.dumps([{"row_index": 0, "column": "name", "entities": []}] * 2), clash)
+
+
+class _SequencedLLM:
+    """Gives its responses in order, and records the prompts."""
+
+    def __init__(self, *responses: object) -> None:
+        self.responses, self.prompts = [json.dumps(r) for r in responses], []
+
+    async def generate(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.responses[len(self.prompts) - 1]
+
+
+@pytest.mark.asyncio
+async def test_schemaorg_cpa_shortlists_every_target_then_decides_them_together() -> None:
+    shortlists = {"start": ["schema:startDate", "schema:endDate"], "end": ["endDate", "schema:startDate", "schema:isbn"]}
+    decision = [{"table_id": "tbl", "subject_column": "event", "relationships": [
+        {"target_column": "start", "relation_id": "schema:startDate"},
+        {"target_column": "end", "relation_id": "schema:endDate"},
+    ]}]
+    llm = _SequencedLLM(shortlists, decision)
+    rows = [{"event": "Jazz night", "start": "2020-06-01", "end": "2020-06-03"}]
+    tasks = [{"task_id": "t1", "table_id": "tbl", "subject_column": "event", "subject_class": "schema:Event",
+              "sampled_rows": rows, "debug": True}]
+    out = (await run_table_cpa(tasks, "schemaorg_cpa_v1", llm, settings=SETTINGS))["results"][0]
+
+    # One shortlist call for the whole table, one decision for both targets.
+    assert len(llm.prompts) == 2 and '"start"' in llm.prompts[0] and '"end"' in llm.prompts[0]
+    assert [(r["target_column"], r["relation_id"]) for r in out["relationships"]] == [
+        ("start", "schema:startDate"), ("end", "schema:endDate")]
+    # Each target keeps its own shortlist ("endDate" is read as schema:endDate; isbn is no Event property).
+    assert out["debug"]["targets"]["end"]["shortlist_preview"] == ["schema:endDate", "schema:startDate"]
+    decide = llm.prompts[1]
+    assert "- end: schema:endDate, schema:startDate" in decide and "a start and an end date" in decide
+    allowed = decide.split("Allowed relationship labels: ")[1].split("\n")[0].split(", ")
+    assert set(allowed) == {"schema:startDate", "schema:endDate", "moose:NONE", "moose:OTHER"}

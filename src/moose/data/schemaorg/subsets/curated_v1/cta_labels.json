@@ -30,6 +30,11 @@
     "label": "AccountingService"
   },
   {
+    "id": "schema:Action",
+    "iri": "https://schema.org/Action",
+    "label": "Action"
+  },
+  {
     "id": "schema:AdministrativeArea",
     "iri": "https://schema.org/AdministrativeArea",
     "label": "AdministrativeArea"
@@ -48,6 +53,11 @@
     "id": "schema:AdvertiserContentArticle",
     "iri": "https://schema.org/AdvertiserContentArticle",
     "label": "AdvertiserContentArticle"
+  },
+  {
+    "id": "schema:AggregateOffer",
+    "iri": "https://schema.org/AggregateOffer",
+    "label": "AggregateOffer"
   },
   {
     "id": "schema:AggregateRating",
@@ -375,9 +385,19 @@
     "label": "BusStop"
   },
   {
+    "id": "schema:BusinessEntityType",
+    "iri": "https://schema.org/BusinessEntityType",
+    "label": "BusinessEntityType"
+  },
+  {
     "id": "schema:BusinessEvent",
     "iri": "https://schema.org/BusinessEvent",
     "label": "BusinessEvent"
+  },
+  {
+    "id": "schema:BusinessFunction",
+    "iri": "https://schema.org/BusinessFunction",
+    "label": "BusinessFunction"
   },
   {
     "id": "schema:CDCPMDRecord",
@@ -733,6 +753,11 @@
     "id": "schema:DateTime",
     "iri": "https://schema.org/DateTime",
     "label": "DateTime"
+  },
+  {
+    "id": "schema:DayOfWeek",
+    "iri": "https://schema.org/DayOfWeek",
+    "label": "DayOfWeek"
   },
   {
     "id": "schema:DaySpa",
@@ -1360,6 +1385,11 @@
     "label": "InternetCafe"
   },
   {
+    "id": "schema:ItemAvailability",
+    "iri": "https://schema.org/ItemAvailability",
+    "label": "ItemAvailability"
+  },
+  {
     "id": "schema:ItemList",
     "iri": "https://schema.org/ItemList",
     "label": "ItemList"
@@ -1933,6 +1963,11 @@
     "id": "schema:OfferItemCondition",
     "iri": "https://schema.org/OfferItemCondition",
     "label": "OfferItemCondition"
+  },
+  {
+    "id": "schema:OfferShippingDetails",
+    "iri": "https://schema.org/OfferShippingDetails",
+    "label": "OfferShippingDetails"
   },
   {
     "id": "schema:OfficeEquipmentStore",
@@ -2815,6 +2850,11 @@
     "label": "TravelAgency"
   },
   {
+    "id": "schema:Trip",
+    "iri": "https://schema.org/Trip",
+    "label": "Trip"
+  },
+  {
     "id": "schema:TypeAndQuantityNode",
     "iri": "https://schema.org/TypeAndQuantityNode",
     "label": "TypeAndQuantityNode"
@@ -2963,6 +3003,11 @@
     "id": "schema:WPSideBar",
     "iri": "https://schema.org/WPSideBar",
     "label": "WPSideBar"
+  },
+  {
+    "id": "schema:WarrantyPromise",
+    "iri": "https://schema.org/WarrantyPromise",
+    "label": "WarrantyPromise"
   },
   {
     "id": "schema:Waterfall",

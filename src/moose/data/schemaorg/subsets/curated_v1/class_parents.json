@@ -14,6 +14,9 @@
   "schema:AccountingService": [
     "schema:FinancialService"
   ],
+  "schema:Action": [
+    "schema:Thing"
+  ],
   "schema:AdministrativeArea": [
     "schema:Place"
   ],
@@ -23,6 +26,9 @@
   "schema:AdultOrientedEnumeration": [],
   "schema:AdvertiserContentArticle": [
     "schema:Article"
+  ],
+  "schema:AggregateOffer": [
+    "schema:Offer"
   ],
   "schema:AggregateRating": [
     "schema:Rating"
@@ -216,9 +222,11 @@
   "schema:BusStop": [
     "schema:CivicStructure"
   ],
+  "schema:BusinessEntityType": [],
   "schema:BusinessEvent": [
     "schema:Event"
   ],
+  "schema:BusinessFunction": [],
   "schema:CDCPMDRecord": [
     "schema:StructuredValue"
   ],
@@ -428,6 +436,7 @@
   ],
   "schema:Date": [],
   "schema:DateTime": [],
+  "schema:DayOfWeek": [],
   "schema:DaySpa": [
     "schema:HealthAndBeautyBusiness"
   ],
@@ -792,6 +801,7 @@
   "schema:InternetCafe": [
     "schema:LocalBusiness"
   ],
+  "schema:ItemAvailability": [],
   "schema:ItemList": [
     "schema:Intangible"
   ],
@@ -1112,6 +1122,9 @@
     "schema:ItemList"
   ],
   "schema:OfferItemCondition": [],
+  "schema:OfferShippingDetails": [
+    "schema:StructuredValue"
+  ],
   "schema:OfficeEquipmentStore": [
     "schema:Store"
   ],
@@ -1492,7 +1505,9 @@
   "schema:SoftwareSourceCode": [
     "schema:CreativeWork"
   ],
-  "schema:SolveMathAction": [],
+  "schema:SolveMathAction": [
+    "schema:Action"
+  ],
   "schema:SomeProducts": [
     "schema:Product"
   ],
@@ -1633,6 +1648,9 @@
   "schema:TravelAgency": [
     "schema:LocalBusiness"
   ],
+  "schema:Trip": [
+    "schema:Intangible"
+  ],
   "schema:TypeAndQuantityNode": [
     "schema:StructuredValue"
   ],
@@ -1723,6 +1741,9 @@
   ],
   "schema:WPSideBar": [
     "schema:WebPageElement"
+  ],
+  "schema:WarrantyPromise": [
+    "schema:StructuredValue"
   ],
   "schema:Waterfall": [
     "schema:BodyOfWater"
