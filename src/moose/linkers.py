@@ -159,9 +159,12 @@ CPA_PROMPT = Prompt(
 
 
 # Laya reads 512 tokens, the question and options included, and the context comes first: on a
-# longer text the mention and its line are cut off, and every mention of the text gets the same
+# long text the mention and its line are cut off, and every mention of the text gets the same
 # scores. A mention with a position in a longer text is shown with this much text around it.
-LAYA_CONTEXT_CHARS = 800
+# Laya was trained and calibrated on short texts (DPVCallBench's calls, at most 121 characters):
+# with 800 characters it typed most names in court cases (TAB) dpv:Adult or Identifier, with 400
+# it typed 66 of 87 Name and 3 Adult.
+LAYA_CONTEXT_CHARS = 400
 
 
 def _laya_context(context: str, item: dict[str, Any]) -> str:

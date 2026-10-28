@@ -56,20 +56,16 @@ are odd (case numbers as `DeviceApplications`, names as `School`) but still pers
 
 ### Test split
 
-30 random test documents (seed 0) with all three fixes below, frozen before the run: none
-failed, $0.24.
+30 random test documents (seed 0), run once with all three fixes below, and once more after
+the window fix of 2 (800 → 400 characters), developed on dev. None failed; $0.24 per run.
 
-| Masked | DIRECT recall | QUASI recall | Token precision | Mention precision |
+| Personal-data spans masked | DIRECT recall | QUASI recall | Token precision | Names typed `dpv:Adult` |
 |---|---|---|---|---|
-| personal-data spans (`dpv-pd:*`) | 0.76 | 0.32 | 0.80 | 0.81 |
-| every annotated span | 0.88 | 0.38 | 0.72 | 0.72 |
+| 800-character window | 0.76 | 0.32 | 0.80 | 60 |
+| 400-character window | 0.85 | 0.35 | 0.79 | 5 |
 
-Moose finds the names (PERSON 228/243, CODE 78/82), but types 60 of them `dpv:Adult`, which
-is not masked: 33 decided by Laya alone, confidently, and 27 where the LLM was asked, 24 of
-which it answered Name and Laya, rescoring with that hint, kept Adult. That is why DIRECT
-recall is 0.76 for personal-data spans and 0.88 for every span. It is an open problem, not
-fixed here: `system1+llm` lets Laya decide after the LLM's hint by design, as calibrated on
-DPVCallBench, and changing that should be done on development data, not on this split.
+With every annotated span masked: DIRECT 0.87, QUASI 0.36, token precision 0.71. Names are
+found (PERSON 228/243, typed Name 199 times) and so are case numbers (CODE 77/82).
 
 ## What TAB found in Moose
 
@@ -90,9 +86,13 @@ on the 13 documents both later runs completed (3), for personal-data spans:
    characters, cut at paragraph breaks (`moose.ner.MENTION_CHUNK_CHARS`).
 2. **Laya never saw mentions in long texts.** Laya reads 512 tokens with the text first, so
    in a long text the mention was cut off and every mention of a document got the same
-   scores: all names became `dpv:Adult`. Laya now sees 800 characters around a mention in a
-   longer text (`moose.linkers.LAYA_CONTEXT_CHARS`). Texts under 800 characters, such as
-   DPVCallBench's calls (at most 121), are given to Laya as before.
+   scores: all names became `dpv:Adult`. Laya now sees 400 characters around a mention in a
+   longer text (`moose.linkers.LAYA_CONTEXT_CHARS`). 800 fit in its tokens too, but Laya was
+   trained and calibrated on short calls, and with that much context it still typed many
+   names `dpv:Adult` or Identifier; rescoring the 87 person names of the dev run (no LLM
+   calls) gave Name 16 / Adult 21 with 800 characters, 66 / 3 with 400 (200 and 300 were in
+   between). DPVCallBench's texts (at most 146 characters) are given to Laya as before, so
+   its calibration is unchanged.
 3. **The LLM spent its reasoning counting characters.** The mention step asked for character
    offsets, which Moose then corrected by searching for the mention's text anyway.
    `gpt-oss-120b` spent 6,000-15,000 reasoning tokens per chunk on them, and on some chunks
