@@ -74,6 +74,25 @@ the same 50 tables: accuracy 0.451 → 0.627, `moose:OTHER` answers 58 → 4, co
 Laya's probabilities are not calibrated on tables (ECE 0.19–0.49, AUROC about 0.5 for CPA),
 so table results keep `"calibrated": false`.
 
+### Can they be calibrated?
+
+Not usefully. Fitted on the validation runs of the current pipeline (CTA 400 columns, CPA 204)
+and checked on the test runs (CTA 99, CPA 176), with no new LLM calls:
+
+| Probability on test | CTA ECE | CTA AUROC | CPA ECE | CPA AUROC |
+|---|---|---|---|---|
+| Laya's yes/no, as reported | 0.189 | 0.54 | 0.254 | 0.47 |
+| the same, isotonic / Platt | 0.115 / 0.116 | 0.53 / 0.54 | 0.053 / 0.033 | 0.52 / 0.53 |
+| CTA: chosen type's probability in Laya's ranking, Platt | 0.143 | 0.49 | | |
+| CTA: Laya's top type agrees with the LLM's, Platt | 0.088 | 0.51 | | |
+| a constant: validation accuracy | 0.099 | 0.50 | 0.025 | 0.50 |
+
+No signal tells right from wrong answers on test (AUROC 0.47–0.54, chance is 0.5). Mapping
+the probabilities lowers ECE only by pulling every value to the average accuracy, which a
+constant does as well. Shipping such a mapping would make tables look calibrated while their
+confidence carries no information, so none is shipped. Telling right from wrong on tables
+needs a better signal: Laya fine-tuned on SOTAB's training split, for example.
+
 Showing the other columns while labelling one target did not help: with SOTAB's numbered
 columns the LLM lost track of the target and answered `moose:OTHER` for nearly everything.
 Labelling all targets together, as the redesign does, works. Too few start/end date pairs
