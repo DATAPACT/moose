@@ -17,7 +17,7 @@ if all its mentions are masked) and token precision.
 # Data under data/: echr_dev.json, echr_test.json and evaluation.py from the TAB repository
 # The scorer needs spacy and en_core_web_md in research/.venv-laya
 PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --split dev --docs 15
-# The anonymisation mode's mention step (docs/design/anonymisation.md), every mention masked
+# moose.anonymise (docs/design/anonymisation.md), protecting the applicant
 PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --mode anonymise --split dev --docs 15
 ```
 

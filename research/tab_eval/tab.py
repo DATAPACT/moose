@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from moose import OpenRouterClient
-from moose.anonymise import find_identifiers
+from moose.anonymise import MASKED, anonymise
 from moose.config import Settings
 from moose.llm.usage import track_llm_usage
 from moose.ner import run_text_ner
@@ -43,6 +43,8 @@ REPO = HERE.parents[1]
 DATA = HERE / "data"
 RUNS = HERE / "runs"
 SCHEMA = "dpv_privacy"
+# Whom TAB's annotators protected, for --mode anonymise.
+PROTECT = "the applicant (the person who brought the case before the Court)"
 
 
 def _scorer():
@@ -54,7 +56,11 @@ def _scorer():
 
 
 def masked_spans(entities: list[dict[str, Any]], variant: str) -> list[list[int]]:
-    keep = (lambda e: True) if variant == "all" else (lambda e: str(e.get("type_id", "")).startswith("dpv-pd:"))
+    keep = {
+        "all": lambda e: True,
+        "masked": lambda e: e.get("identifier_type") in MASKED,
+        "personal_data": lambda e: str(e.get("type_id", "")).startswith("dpv-pd:"),
+    }[variant]
     return [[e["start"], e["end"]] for e in entities if keep(e)]
 
 
@@ -99,8 +105,9 @@ async def main_async(args: argparse.Namespace) -> None:
     settings = Settings(MOOSE_MAX_RETRIES=2)
 
     async def annotate(text: str) -> list[dict[str, Any]]:
-        if args.mode == "anonymise":  # step 1 only: every mention found, its category as its type
-            return [{**m, "type_id": m["category"]} for m in await find_identifiers(text, llm, settings)]
+        if args.mode == "anonymise":  # each mention's category as its type
+            out = await anonymise(text, llm, protect=PROTECT, settings=settings)
+            return [{**m, "type_id": m["category"]} for m in out["entities"]]
         out = await run_text_ner([{"task_id": "t", "text": text}], SCHEMA, llm, settings)
         return out["results"][0]["entities"]
     gate = asyncio.Semaphore(args.concurrency)
@@ -134,7 +141,7 @@ async def main_async(args: argparse.Namespace) -> None:
     report: dict[str, Any] = {"split": args.split, "mode": args.mode, "model": args.model, "documents": len(done),
                               "failed_documents": len(chosen) - len(done),
                               "cost_usd": round(sum(e.get("cost") or 0 for e in done.values()), 4)}
-    variants = ("all",) if args.mode == "anonymise" else ("personal_data", "all")
+    variants = ("masked", "all") if args.mode == "anonymise" else ("personal_data", "all")
     for variant in variants:
         masked = [scorer.MaskedDocument(d, [tuple(s) for s in masked_spans(e["entities"], variant)]) for d, e in done.items()]
         report[variant] = scorer.evaluate(gold, masked)
@@ -162,7 +169,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--split", choices=("dev", "test"), default="dev")
     parser.add_argument("--mode", choices=("dpv_privacy", "anonymise"), default="dpv_privacy",
-                        help="anonymise: moose.anonymise's mention step (every mention found is masked)")
+                        help="anonymise: moose.anonymise, protecting the applicant ('all' masks every mention found)")
     parser.add_argument("--docs", type=int, default=15, help="random documents of the split")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--docs-from", help="an earlier run's raw.jsonl: annotate the same documents")

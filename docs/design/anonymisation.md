@@ -1,7 +1,7 @@
 # Design: an anonymisation mode
 
-Status: step 1 (finding mentions) implemented in `moose.anonymise.find_identifiers`; steps 2-4
-are not.
+Status: steps 1 and 2 implemented in `moose.anonymise` (`find_identifiers`, `anonymise`), with
+`"confidence": null` and `"calibrated": false`; steps 3 (API, docs) and 4 (Laya, calibration) are not.
 
 ## Why
 
@@ -114,6 +114,26 @@ DIRECT and QUASI mentions of each TAB type found:
 Of the mentions TAB does not mask, 225 of 286 are found too, which is what costs precision:
 step 2 has to leave them unmasked. The weak spots are MISC (injuries and other descriptions)
 and DEM (job titles, ranks).
+
+## Step 2 results
+
+The same 15 dev cases, protecting "the applicant", masking what the decision says to mask.
+The mentions are step 1's; only the decision was rerun for the second rules ($0.07).
+
+| | DIRECT recall | QUASI recall | Token precision | Mention precision |
+|---|---|---|---|---|
+| `dpv_privacy` (personal-data spans) | 0.91 | 0.37 | 0.81 | 0.80 |
+| step 1, every mention masked | 0.93 | 0.95 | 0.52 | 0.52 |
+| step 2, first rules | 0.93 | 0.60 | 0.90 | 0.87 |
+| step 2, rules as TAB masks | 0.93 | 0.80 | 0.77 | 0.74 |
+
+The first rules left public bodies, officials and judges unmasked. TAB's annotators masked
+them: officials' and judges' names, local courts and councils (they give the place), other
+applications' numbers, cities, nationalities and injuries; only the state, its national
+bodies, international institutions and legal references stayed. The rules now say so. Cost:
+about $0.014 per case, $0.010 to find mentions and $0.004 to decide.
+
+Not tuned further on these 15 cases. Before step 3, the next check is TAB's test split once.
 
 ## Decisions
 
