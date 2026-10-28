@@ -8,9 +8,9 @@ from moose.config import Settings, get_settings
 from moose.linkers import CPA_PROMPT, Calibration, llm_choice_verdicts
 from moose.ner import _choices_to_scores, run_table_annotate
 from moose.prob import choose_argmax
-from moose.prompts import build_cpa_prompt, build_type_selection_prompt, table_to_markdown
+from moose.prompts import build_cpa_prompt, build_cpa_shortlist_prompt, table_to_markdown
 from moose.schema import DATA_DIR, get_schema_config
-from moose.validate import extract_json, validate_cpa_response, validate_type_selection_response
+from moose.validate import extract_json, validate_cpa_response
 
 
 # --------------------------
@@ -25,11 +25,6 @@ def _ordered_union_columns(sampled_rows: list[dict[str, Any]]) -> list[str]:
                 cols.append(k)
                 seen.add(k)
     return cols
-
-
-def _project_rows(sampled_rows: list[dict[str, Any]], columns: list[str]) -> list[dict[str, Any]]:
-    cols = list(columns)
-    return [{c: row.get(c) for c in cols} for row in sampled_rows]
 
 
 def _sentinel_labels(relation_ids: list[str]) -> list[str]:
@@ -99,22 +94,17 @@ def _coerce_cpa_output_with_task_ids(raw_text: str, tasks: list[dict[str, Any]])
     return json.dumps(coerced, ensure_ascii=True)
 
 
-def _batch_type_ids_for_prompt(schema_config, tasks: list[dict[str, Any]], type_ids: list[str], mode: str, max_chars: int) -> list[list[str]]:
-    """
-    Batch the allowed type_ids list so the selection prompt stays within max_chars.
-    """
+def _batch_ids(build_prompt, ids: list[str], max_chars: int) -> list[list[str]]:
+    """Split ids into batches whose prompt (build_prompt(batch)) stays within max_chars."""
     batches: list[list[str]] = []
     current: list[str] = []
-
-    for type_id in type_ids:
+    for type_id in ids:
         candidate = current + [type_id]
-        prompt = build_type_selection_prompt(schema_config, tasks, candidate, mode)
-        if current and len(prompt) > max_chars:
+        if current and len(build_prompt(candidate)) > max_chars:
             batches.append(current)
             current = [type_id]
         else:
             current = candidate
-
     if current:
         batches.append(current)
     return batches
@@ -266,81 +256,105 @@ async def _infer_subject_class_via_cta(
 
 
 # --------------------------
-# STI signature caching helper
+# Deep CPA: shortlists, then one decision per table
 # --------------------------
-async def _get_sti_types_for_table(sampled_rows: list[dict[str, Any]], llm_client, settings: Settings) -> dict[str, str]:
-    sti_task = {"task_id": "sti-cache-1", "table_id": "sti-cache", "sampled_rows": sampled_rows}
-    try:
-        out = await run_table_annotate([sti_task], "sti", llm_client, settings=settings)
-        results = out.get("results", [])
-        if not results:
-            return {}
-        cols = results[0].get("columns", [])
-        mapping: dict[str, str] = {}
-        for c in cols:
-            col_name = c.get("column")
-            tid = c.get("type_id")
-            if isinstance(col_name, str) and isinstance(tid, str):
-                mapping[col_name] = tid
-        return mapping
-    except Exception:  # noqa: BLE001
-        return {}
+SHORTLIST_SIZE = 8
 
 
-# --------------------------
-# Per-target selection (deep CPA)
-# --------------------------
-async def _select_relation_ids_per_target(
+def _to_allowed(value: str, allowed: set[str]) -> str | None:
+    """A label as the LLM wrote it (schema:author, author, https://schema.org/author) to its id."""
+    rid = _normalize_schema_curie(value)
+    if rid in allowed:
+        return rid
+    return f"schema:{rid}" if f"schema:{rid}" in allowed else None
+
+
+def _parse_shortlists(raw_text: str, targets: list[str], allowed: set[str]) -> dict[str, list[str]]:
+    data = extract_json(raw_text)
+    if not isinstance(data, dict):
+        raise ValueError("The shortlist response must be a JSON object keyed by target column.")
+    out: dict[str, list[str]] = {}
+    for target in targets:
+        values = data.get(target)
+        if not isinstance(values, list):
+            raise ValueError(f"The shortlist response has no list for target column {target!r}.")
+        ids = (_to_allowed(v, allowed) for v in values if isinstance(v, str))
+        out[target] = list(dict.fromkeys(rid for rid in ids if rid))
+    return out
+
+
+async def _shortlist_relation_ids(
     schema_config,
     *,
-    table_id: str,
-    subject_column: str,
-    target_column: str,
-    sampled_rows: list[dict[str, Any]],
+    task: dict[str, Any],
     relation_ids: list[str],
     llm_client,
     settings: Settings,
-) -> list[str]:
-    """
-    LLM selection per target column using build_type_selection_prompt(mode="cpa").
-    """
-    selection_task = {
-        "table_id": table_id,
-        "subject_column": subject_column,
-        "target_column": target_column,
-        "sampled_rows": _project_rows(sampled_rows, [subject_column, target_column]),
-    }
+    max_rows: int,
+) -> dict[str, list[str]]:
+    """Recall step: for every target column at once, the relations that could link the subject
+    column to it, most likely first. Large label sets are asked in batches."""
+    targets: list[str] = task["target_columns"]
+    sentinels = set(_sentinel_labels(relation_ids))
+    candidates = [rid for rid in relation_ids if rid not in sentinels]
+    shortlists: dict[str, list[str]] = {t: [] for t in targets}
 
-    selected: set[str] = set()
-    type_batches = _batch_type_ids_for_prompt(
-        schema_config=schema_config,
-        tasks=[selection_task],
-        type_ids=relation_ids,
-        mode="cpa",
-        max_chars=settings.MOOSE_MAX_CHARS_PER_PROMPT,
+    def build(ids: list[str]) -> str:
+        return build_cpa_shortlist_prompt(schema_config, task, ids, SHORTLIST_SIZE, max_rows=max_rows)
+
+    for batch in _batch_ids(build, candidates, settings.MOOSE_MAX_CHARS_PER_PROMPT):
+        allowed = set(batch)
+        found = await _run_with_retries(
+            llm_client, build(batch), lambda raw, allowed=allowed: _parse_shortlists(raw, targets, allowed), settings.MOOSE_MAX_RETRIES
+        )
+        for target, ids in found.items():
+            shortlists[target].extend(rid for rid in ids if rid not in shortlists[target])
+    return shortlists
+
+
+async def _decide_relations(
+    schema_config,
+    task_base: dict[str, Any],
+    targets: list[str],
+    relation_ids: list[str],
+    llm_client,
+    settings: Settings,
+    max_rows: int,
+    candidates: dict[str, list[str]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """One LLM call choosing a relation for each target column, which sees the others too;
+    then the System 1 model's probability for each choice."""
+    task_id, table_id, subject_column = task_base["task_id"], task_base["table_id"], task_base["subject_column"]
+    chunk_task = {**task_base, "target_columns": targets}
+    if candidates:
+        chunk_task["candidates"] = candidates
+    prompt = build_cpa_prompt(schema_config, chunk_task, relation_ids, max_rows=max_rows)
+    allowed_set = set(relation_ids)
+
+    def validator(raw_text: str):
+        raw_text = _choices_to_scores(raw_text, relation_ids, schema_config.require_all_scores, key="relation_id")
+        normalized_raw = _coerce_cpa_output_with_task_ids(
+            raw_text, [{"task_id": task_id, "table_id": table_id, "subject_column": subject_column}]
+        )
+        return validate_cpa_response(
+            [{"task_id": task_id, "table_id": table_id, "subject_column": subject_column, "target_columns": targets}],
+            normalized_raw,
+            allowed_set,
+            require_all_scores=schema_config.require_all_scores,
+            type_aliases=schema_config.type_aliases,
+            type_alias_prefixes=schema_config.type_alias_prefixes,
+        )
+
+    parsed = await _run_with_retries(llm_client, prompt, validator, settings.MOOSE_MAX_RETRIES)
+    out: dict[str, dict[str, Any]] = {}
+    for rel in parsed[0].relationships:
+        scores = {rid: float(rel.scores.get(rid, 0.0)) for rid in relation_ids}
+        relation_id, _llm_score, _distribution = choose_argmax(scores)
+        out[rel.target_column] = {"target_column": rel.target_column, "relation_id": relation_id}
+    await _system1_probabilities(
+        schema_config, task_base["sampled_rows"], subject_column, [out[c] for c in targets if c in out], max_rows
     )
-
-    for type_batch in type_batches:
-        prompt = build_type_selection_prompt(schema_config, [selection_task], type_batch, mode="cpa")
-
-        def validator(raw_text: str):
-            return validate_type_selection_response(
-                raw_text,
-                set(type_batch),
-                type_aliases=schema_config.type_aliases,
-                type_alias_prefixes=schema_config.type_alias_prefixes,
-            )
-
-        extracted = await _run_with_retries(llm_client, prompt, validator, settings.MOOSE_MAX_RETRIES)
-        selected.update(extracted)
-
-    for s in _sentinel_labels(relation_ids):
-        selected.add(s)
-
-    if not selected:
-        return relation_ids
-
-    return [rid for rid in relation_ids if rid in selected]
+    return out
 
 
 # --------------------------
@@ -414,7 +428,6 @@ async def run_table_cpa(
         raise ValueError(f"Schema '{schema}' does not support CPA.")
 
     relation_ids = schema_config.load_type_ids()
-    require_all_scores = schema_config.require_all_scores
 
     results_by_id: dict[str, dict[str, Any]] = {}
 
@@ -437,8 +450,6 @@ async def run_table_cpa(
         debug = bool(task.get("debug", False))
         debug_preview_limit = int(task.get("debug_preview_limit", 20))
         debug_preview_limit = max(0, min(debug_preview_limit, 200))
-
-        use_sti_signature_cache = bool(task.get("use_sti_signature_cache", True))
 
         all_columns = _ordered_union_columns(sampled_rows)
         if subject_column not in all_columns:
@@ -463,7 +474,7 @@ async def run_table_cpa(
             continue
 
         # ------------------------------------------------------------
-        # DEEP CPA: per-target selection + per-target scoring
+        # DEEP CPA: a shortlist per target column, then one decision for the table
         # ------------------------------------------------------------
         if schema_config.prefilter_types:
             debug_obj: dict[str, Any] = {}
@@ -471,8 +482,7 @@ async def run_table_cpa(
                 debug_obj = {
                     "schema": schema_config.name,
                     "prefilter_types": True,
-                    "selection_mode": "per_target",
-                    "use_sti_signature_cache": use_sti_signature_cache,
+                    "selection_mode": "per_table",
                     "targets": {},
                 }
 
@@ -508,105 +518,48 @@ async def run_table_cpa(
             if debug:
                 debug_obj["relation_ids_after_domain_filter"] = len(domain_filtered_relation_ids)
 
-            # STI signature caching
-            sti_type_by_col: dict[str, str] = {}
-            if use_sti_signature_cache:
-                sti_type_by_col = await _get_sti_types_for_table(sampled_rows, llm_client, settings)
+            task_base = {
+                "task_id": task_id,
+                "table_id": table_id,
+                "sampled_rows": sampled_rows,
+                "subject_column": subject_column,
+            }
+            shortlists = await _shortlist_relation_ids(
+                schema_config,
+                task={**task_base, "target_columns": target_columns, "subject_class": subject_class},
+                relation_ids=domain_filtered_relation_ids,
+                llm_client=llm_client,
+                settings=settings,
+                max_rows=max_rows_in_prompt,
+            )
+            sentinels = _sentinel_labels(relation_ids)
 
-            selection_cache_by_sig: dict[str, list[str]] = {}
-            cache_hits = 0
-            cache_misses = 0
+            def allowed_for(targets: list[str]) -> list[str]:
+                listed = {rid for t in targets for rid in shortlists[t]}
+                return [rid for rid in domain_filtered_relation_ids if rid in listed and rid not in sentinels] + sentinels
 
             relationships_out: dict[str, dict[str, Any]] = {}
-
-            for target_col in target_columns:
-                sig = ""
-                if use_sti_signature_cache:
-                    sig = sti_type_by_col.get(target_col, "") or ""
-
-                cache_hit = False
-                if sig and sig in selection_cache_by_sig:
-                    selected_relation_ids = selection_cache_by_sig[sig]
-                    cache_hits += 1
-                    cache_hit = True
-                else:
-                    selected_relation_ids = await _select_relation_ids_per_target(
-                        schema_config,
-                        table_id=table_id,
-                        subject_column=subject_column,
-                        target_column=target_col,
-                        sampled_rows=sampled_rows,
-                        relation_ids=domain_filtered_relation_ids,
-                        llm_client=llm_client,
-                        settings=settings,
+            chunks = _chunk_targets_by_prompt_size(
+                schema_config=schema_config,
+                task_base=task_base,
+                relation_ids=allowed_for(target_columns),
+                targets=target_columns,
+                max_chars=settings.MOOSE_MAX_CHARS_PER_PROMPT,
+                max_rows=max_rows_in_prompt,
+            )
+            for chunk_targets in chunks:
+                relationships_out.update(
+                    await _decide_relations(
+                        schema_config, task_base, chunk_targets, allowed_for(chunk_targets), llm_client, settings,
+                        max_rows_in_prompt, candidates={t: shortlists[t] for t in chunk_targets},
                     )
-                    cache_misses += 1
-                    if sig:
-                        selection_cache_by_sig[sig] = selected_relation_ids
-
-                # Score this single target column using only selected predicates
-                scoring_task = {
-                    "task_id": task_id,
-                    "table_id": table_id,
-                    "sampled_rows": sampled_rows,
-                    "subject_column": subject_column,
-                    "target_columns": [target_col],
-                }
-                prompt = build_cpa_prompt(schema_config, scoring_task, selected_relation_ids, max_rows=max_rows_in_prompt)
-
-                allowed_set = set(selected_relation_ids)
-
-                def validator(raw_text: str):
-                    raw_text = _choices_to_scores(raw_text, selected_relation_ids, require_all_scores, key="relation_id")
-                    normalized_raw = _coerce_cpa_output_with_task_ids(
-                        raw_text,
-                        [
-                            {
-                                "task_id": task_id,
-                                "table_id": table_id,
-                                "subject_column": subject_column,
-                            }
-                        ],
-                    )
-                    return validate_cpa_response(
-                        [
-                            {
-                                "task_id": task_id,
-                                "table_id": table_id,
-                                "subject_column": subject_column,
-                                "target_columns": [target_col],
-                            }
-                        ],
-                        normalized_raw,
-                        allowed_set,
-                        require_all_scores=require_all_scores,
-                        type_aliases=schema_config.type_aliases,
-                        type_alias_prefixes=schema_config.type_alias_prefixes,
-                    )
-
-                parsed = await _run_with_retries(llm_client, prompt, validator, settings.MOOSE_MAX_RETRIES)
-                item = parsed[0]
-                rel = item.relationships[0]
-
-                scores = {rid: float(rel.scores.get(rid, 0.0)) for rid in selected_relation_ids}
-                relation_id, _llm_score, _distribution = choose_argmax(scores)
-
-                out: dict[str, Any] = {"target_column": target_col, "relation_id": relation_id}
-                await _system1_probabilities(schema_config, sampled_rows, subject_column, [out], max_rows_in_prompt)
-                relationships_out[target_col] = out
-
-                if debug:
-                    preview = selected_relation_ids[:debug_preview_limit] if debug_preview_limit else []
-                    debug_obj["targets"][target_col] = {
-                        "sti_signature": sig or None,
-                        "cache_hit": cache_hit,
-                        "domain_candidates": len(domain_filtered_relation_ids),
-                        "selected_count": len(selected_relation_ids),
-                        "selected_preview": preview,
-                    }
+                )
 
             if debug:
-                debug_obj["cache"] = {"hits": cache_hits, "misses": cache_misses, "keys": len(selection_cache_by_sig)}
+                debug_obj["targets"] = {
+                    t: {"shortlist_count": len(shortlists[t]), "shortlist_preview": shortlists[t][:debug_preview_limit]}
+                    for t in target_columns
+                }
 
             ordered_relationships = [relationships_out[c] for c in target_columns if c in relationships_out]
             out_item: dict[str, Any] = {
@@ -624,7 +577,6 @@ async def run_table_cpa(
         # ------------------------------------------------------------
         # FAST CPA: CPA-lite, chunk targets into few prompts
         # ------------------------------------------------------------
-        allowed_set = set(relation_ids)
         task_base = {
             "task_id": task_id,
             "table_id": table_id,
@@ -640,43 +592,10 @@ async def run_table_cpa(
             max_rows=max_rows_in_prompt,
         )
 
-        relationships_out: dict[str, dict[str, Any]] = {}
+        relationships_out = {}
         for chunk_targets in chunks:
-            chunk_task = {**task_base, "target_columns": chunk_targets}
-            prompt = build_cpa_prompt(schema_config, chunk_task, relation_ids, max_rows=max_rows_in_prompt)
-
-            def validator(raw_text: str):
-                raw_text = _choices_to_scores(raw_text, relation_ids, require_all_scores, key="relation_id")
-                normalized_raw = _coerce_cpa_output_with_task_ids(
-                    raw_text,
-                    [{"task_id": task_id, "table_id": table_id, "subject_column": subject_column}],
-                )
-                return validate_cpa_response(
-                    [
-                        {
-                            "task_id": task_id,
-                            "table_id": table_id,
-                            "subject_column": subject_column,
-                            "target_columns": chunk_targets,
-                        }
-                    ],
-                    normalized_raw,
-                    allowed_set,
-                    require_all_scores=require_all_scores,
-                    type_aliases=schema_config.type_aliases,
-                    type_alias_prefixes=schema_config.type_alias_prefixes,
-                )
-
-            parsed = await _run_with_retries(llm_client, prompt, validator, settings.MOOSE_MAX_RETRIES)
-            item = parsed[0]
-
-            for rel in item.relationships:
-                scores = {rid: float(rel.scores.get(rid, 0.0)) for rid in relation_ids}
-                relation_id, _llm_score, _distribution = choose_argmax(scores)
-                relationships_out[rel.target_column] = {"target_column": rel.target_column, "relation_id": relation_id}
-            await _system1_probabilities(
-                schema_config, sampled_rows, subject_column, [relationships_out[c] for c in chunk_targets if c in relationships_out],
-                max_rows_in_prompt,
+            relationships_out.update(
+                await _decide_relations(schema_config, task_base, chunk_targets, relation_ids, llm_client, settings, max_rows_in_prompt)
             )
 
         ordered_relationships = [relationships_out[c] for c in target_columns if c in relationships_out]

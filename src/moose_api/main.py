@@ -151,8 +151,8 @@ class BaseCPARequest(BaseModel):
 
     target_columns: list[str] | None = None
 
-    # Optional performance knob for deep CPA:
-    # If enabled, Moose runs STI typing once and caches selection by STI type signature across columns.
+    # Deprecated and ignored: deep CPA now shortlists every target column in one call per table.
+    # Kept so existing requests stay valid.
     use_sti_signature_cache: bool = True
 
     # OPTIONAL: debug output (per task)

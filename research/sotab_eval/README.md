@@ -49,6 +49,7 @@ probability against that.
 | CPA validation, before (150 tables) | 516 | 0.421 | 0.44 | 0.51 | $1.00 |
 | CPA validation, after (same tables) | 710 | 0.448 | 0.43 | 0.49 | $1.13 |
 | CPA test, after (50 tables) | 176 | 0.375 | 0.49 | 0.49 | $0.32 |
+| CPA validation, table shortlists (50 of the same tables) | 204 | **0.627** | 0.26 | 0.46 | $0.20 |
 
 On the columns the old label sets could already score, validation went from 0.528 to 0.575
 (CTA) and from 0.421 to 0.436 (CPA). The changes:
@@ -61,10 +62,18 @@ On the columns the old label sets could already score, validation went from 0.52
   `description`, `price`, `streetAddress`, `ratingValue`, ...): CPA coverage on validation went
   from 70% to 96%.
 
+Then CPA's candidate selection was redesigned (last row). It used to shortlist each target
+column alone, from the subject and that column only, and columns of the same coarse type
+shared the first one's shortlist; it often dropped the right property, and `moose:OTHER`
+was the most common answer. Now one call shortlists every target column, seeing the whole
+table and the subject's class, and one call decides all of them, each with its shortlist. On
+the same 50 tables: accuracy 0.451 → 0.627, `moose:OTHER` answers 58 → 4, cost $0.37 → $0.20
+(3 LLM calls per table).
+
 Laya's probabilities are not calibrated on tables (ECE 0.19–0.49, AUROC about 0.5 for CPA),
 so table results keep `"calibrated": false`.
 
-Open problems: CPA's candidate selection sometimes drops the right property, columns of the
-same coarse type share one cached shortlist, and two date columns both get `startDate`.
-Showing the other columns to the LLM did not help: with SOTAB's numbered columns it lost track
-of the target and answered `moose:OTHER` for nearly everything.
+Showing the other columns while labelling one target did not help: with SOTAB's numbered
+columns the LLM lost track of the target and answered `moose:OTHER` for nearly everything.
+Labelling all targets together, as the redesign does, works. Too few start/end date pairs
+are in these 50 tables (two) to say whether that confusion is gone.

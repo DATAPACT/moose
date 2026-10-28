@@ -69,6 +69,19 @@ def build_cpa_prompt(schema: SchemaConfig, task: dict[str, Any], relation_ids: l
         rules_lines.append(f"- Choose {none_label} if there is no relationship.")
     if other_label:
         rules_lines.append(f"- Choose {other_label} if there is a relationship but it is not represented in the label set.")
+    if len(targets) > 1:
+        rules_lines.append(
+            "- Different target columns usually hold different properties: compare similar columns "
+            "(for example a start and an end date) before choosing."
+        )
+    # Deep CPA: each target column's shortlist from the recall step (build_cpa_shortlist_prompt).
+    candidates: dict[str, list[str]] = task.get("candidates") or {}
+    shortlist_lines = []
+    if candidates:
+        rules_lines.append("- Prefer the labels in each target column's shortlist; any allowed label may still be chosen.")
+        shortlist_lines = ["Shortlist per target column (most likely first):"] + [
+            f"- {target}: {', '.join(candidates.get(target) or []) or '(none)'}" for target in targets
+        ] + [""]
 
     return "\n".join(
         [
@@ -100,8 +113,42 @@ def build_cpa_prompt(schema: SchemaConfig, task: dict[str, Any], relation_ids: l
             f"Subject column: {subject}",
             f"Target columns: {json.dumps(targets, ensure_ascii=True)}",
             "",
+            *shortlist_lines,
             "Sample table (markdown):",
             table_md,
+        ]
+    )
+
+
+def build_cpa_shortlist_prompt(
+    schema: SchemaConfig, task: dict[str, Any], relation_ids: list[str], size: int, max_rows: int = 5
+) -> str:
+    """Deep CPA, recall step: the possible relations for every target column of a table at once,
+    so each column gets its own shortlist and the final choice sees the whole table."""
+    subject = task["subject_column"]
+    targets: list[str] = task["target_columns"]
+    subject_class = task.get("subject_class")
+    return "\n".join(
+        [
+            _format_intro(schema.cpa_intro).rstrip(),
+            "Task: for EACH target column, list the relationship labels that could relate the SUBJECT column "
+            f"to it, most likely first, at most {size} per column. Be recall-oriented: the final choice is made later.",
+            *([f"The subject column holds {subject_class} entities."] if subject_class else []),
+            "Return ONLY a JSON object mapping each target column name to its list of labels:",
+            '{"<target column>": ["<label>", "<label>"]}',
+            "",
+            "Rules:",
+            "- Include every target column, named exactly as given; use [] when no label could apply.",
+            "- Only use labels from the allowed relationship labels.",
+            "No extra text around the JSON.",
+            "",
+            f"Allowed relationship labels: {', '.join(relation_ids)}",
+            "",
+            f"Subject column: {subject}",
+            f"Target columns: {json.dumps(targets, ensure_ascii=True)}",
+            "",
+            "Sample table (markdown):",
+            table_to_markdown(task["sampled_rows"], [subject] + targets, max_rows=max_rows),
         ]
     )
 
