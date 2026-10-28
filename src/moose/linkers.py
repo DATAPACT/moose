@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -64,16 +63,14 @@ def laya_available() -> bool:
 class Calibration:
     """How a schema's System 1 decisions are made (see research/dpv_eval/fit_system1.py)."""
 
-    # Hugging Face repo id (a private one needs HF_TOKEN) or a local checkpoint folder.
+    # Hugging Face repo id (a private one needs HF_TOKEN) or a local checkpoint folder. The
+    # thresholds below were fitted for this model: another model needs its own file.
     model: str = DEFAULT_LAYA_MODEL
-    # Environment variable that overrides `model` (e.g. a local folder); MOOSE_LAYA_MODEL by
-    # default. Fine-tuned models use their own, so they do not replace the base model elsewhere.
-    model_env: str = "MOOSE_LAYA_MODEL"
     # system1+llm: ask the LLM about items whose top probability is below this.
     consult_below: float = 0.6
     # Tasks on which Laya's probabilities were checked against labelled data (used for
     # Laya's own linkers when the file has no entry for the linker; never for llm).
-    validated_for: tuple[str, ...] = ("text",)
+    validated_for: tuple[str, ...] = ()
     # Per linker: the tasks on which its probabilities were checked (see
     # research/dpv_eval/check_calibration.py).
     linkers: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -84,16 +81,13 @@ class Calibration:
         if path is None or not path.exists():
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
-        fields = ("model", "model_env", "consult_below", "validated_for", "fitted_on")
+        fields = ("model", "consult_below", "validated_for", "fitted_on")
         known: dict[str, Any] = {k: data[k] for k in fields if k in data}
         if "validated_for" in known:
             known["validated_for"] = tuple(known["validated_for"])
         known["linkers"] = tuple(
             (linker, tuple(entry.get("validated_for") or ())) for linker, entry in (data.get("linkers") or {}).items()
         )
-        override = os.getenv(known.get("model_env", "MOOSE_LAYA_MODEL"))
-        if override:
-            known["model"] = override
         return cls(**known)
 
     def validated_tasks(self, linker: str) -> tuple[str, ...]:
@@ -194,7 +188,7 @@ class LayaScorer:
             raise LinkerUnavailable('Laya is not installed on this server: install "moose[laya]".')
         import laya
 
-        self._agent = laya.load(model, device=os.getenv("MOOSE_LAYA_DEVICE") or None)
+        self._agent = laya.load(model)
         self._lock = threading.Lock()
 
     def _score_sync(

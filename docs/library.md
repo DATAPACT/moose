@@ -120,8 +120,11 @@ results show `"calibrated": false`.
 | Variable | Default | Purpose |
 |---|---|---|
 | `MOOSE_USER_DATA_DIR` | `~/.moose` | where your own schemas are stored |
-| `MOOSE_LAYA_MODEL` | `convaiinnovations/laya` | another Laya checkpoint (a Hugging Face id or a folder) |
-| `MOOSE_LAYA_DEVICE` | automatic | `cpu`, `cuda` or `mps` |
+
+Laya runs on a GPU (CUDA or Apple MPS) when one is available, otherwise on the CPU. Each
+schema's `linker_calibration` file names its Laya checkpoint (a Hugging Face id or a
+folder), so another checkpoint comes with its own file: its probabilities stay
+`"calibrated": false` until they are checked on labelled data.
 
 ## Links
 
