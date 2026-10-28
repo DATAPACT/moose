@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from moose import OpenRouterClient
+from moose.anonymise import MASKED, anonymise
 from moose.config import Settings
 from moose.llm.usage import track_llm_usage
 from moose.ner import run_text_ner
@@ -42,6 +43,8 @@ REPO = HERE.parents[1]
 DATA = HERE / "data"
 RUNS = HERE / "runs"
 SCHEMA = "dpv_privacy"
+# Whom TAB's annotators protected, for --mode anonymise.
+PROTECT = "the applicant (the person who brought the case before the Court)"
 
 
 def _scorer():
@@ -53,7 +56,11 @@ def _scorer():
 
 
 def masked_spans(entities: list[dict[str, Any]], variant: str) -> list[list[int]]:
-    keep = (lambda e: True) if variant == "all" else (lambda e: str(e.get("type_id", "")).startswith("dpv-pd:"))
+    keep = {
+        "all": lambda e: True,
+        "masked": lambda e: e.get("identifier_type") in MASKED,
+        "personal_data": lambda e: str(e.get("type_id", "")).startswith("dpv-pd:"),
+    }[variant]
     return [[e["start"], e["end"]] for e in entities if keep(e)]
 
 
@@ -84,7 +91,8 @@ async def main_async(args: argparse.Namespace) -> None:
         chosen = sorted(docs)
         random.Random(args.seed).shuffle(chosen)
         chosen = chosen[: args.docs]
-    out_dir = RUNS / "_".join(filter(None, (args.split, args.model.replace("/", "_"), args.tag)))
+    mode = "anonymise" if args.mode == "anonymise" else None
+    out_dir = RUNS / "_".join(filter(None, (mode, args.split, args.model.replace("/", "_"), args.tag)))
     out_dir.mkdir(parents=True, exist_ok=True)
     cache = out_dir / "raw.jsonl"
     raw: dict[str, dict[str, Any]] = {}
@@ -95,6 +103,13 @@ async def main_async(args: argparse.Namespace) -> None:
 
     llm = OpenRouterClient(api_key=_api_key(), model=args.model)
     settings = Settings(MOOSE_MAX_RETRIES=2)
+
+    async def annotate(text: str) -> list[dict[str, Any]]:
+        if args.mode == "anonymise":  # each mention's category as its type
+            out = await anonymise(text, llm, protect=PROTECT, settings=settings)
+            return [{**m, "type_id": m["category"]} for m in out["entities"]]
+        out = await run_text_ner([{"task_id": "t", "text": text}], SCHEMA, llm, settings)
+        return out["results"][0]["entities"]
     gate = asyncio.Semaphore(args.concurrency)
     spent = 0.0
 
@@ -105,11 +120,11 @@ async def main_async(args: argparse.Namespace) -> None:
                 return
             try:
                 with track_llm_usage(llm.model) as usage:
-                    out = await run_text_ner([{"task_id": doc_id, "text": docs[doc_id]["text"]}], SCHEMA, llm, settings)
+                    entities = await annotate(docs[doc_id]["text"])
             except Exception as exc:  # noqa: BLE001 - one bad document must not stop the run
                 print(f"  {doc_id} failed: {exc}", flush=True)
                 return
-            entry = {"doc_id": doc_id, "entities": out["results"][0]["entities"], "cost": usage.cost_usd, "calls": usage.calls}
+            entry = {"doc_id": doc_id, "entities": entities, "cost": usage.cost_usd, "calls": usage.calls}
             raw[doc_id] = entry
             spent += usage.cost_usd or 0
             with cache.open("a", encoding="utf-8") as f:
@@ -123,17 +138,18 @@ async def main_async(args: argparse.Namespace) -> None:
     done = {d: raw[d] for d in chosen if d in raw}
     scorer = _scorer()
     gold = scorer.GoldCorpus(str(DATA / f"echr_{args.split}.json"))
-    report: dict[str, Any] = {"split": args.split, "schema": SCHEMA, "model": args.model, "documents": len(done),
+    report: dict[str, Any] = {"split": args.split, "mode": args.mode, "model": args.model, "documents": len(done),
                               "failed_documents": len(chosen) - len(done),
                               "cost_usd": round(sum(e.get("cost") or 0 for e in done.values()), 4)}
-    for variant in ("personal_data", "all"):
+    variants = ("masked", "all") if args.mode == "anonymise" else ("personal_data", "all")
+    for variant in variants:
         masked = [scorer.MaskedDocument(d, [tuple(s) for s in masked_spans(e["entities"], variant)]) for d, e in done.items()]
         report[variant] = scorer.evaluate(gold, masked)
     report["types"] = type_table(docs, done)
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     keys = ("recall_direct_entities", "recall_quasi_entities", "mention_recall", "token_precision", "mention_precision", "token_f1")
     print(json.dumps({k: report[k] for k in ("documents", "failed_documents", "cost_usd")}))
-    for variant in ("personal_data", "all"):
+    for variant in variants:
         print(variant, {k: report[variant][k] for k in keys})
     print("report:", out_dir / "report.json")
 
@@ -152,6 +168,8 @@ def _api_key() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--split", choices=("dev", "test"), default="dev")
+    parser.add_argument("--mode", choices=("dpv_privacy", "anonymise"), default="dpv_privacy",
+                        help="anonymise: moose.anonymise, protecting the applicant ('all' masks every mention found)")
     parser.add_argument("--docs", type=int, default=15, help="random documents of the split")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--docs-from", help="an earlier run's raw.jsonl: annotate the same documents")

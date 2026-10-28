@@ -4,7 +4,7 @@ from typing import Callable
 
 import httpx
 
-from moose.llm.base import LLMClient
+from moose.llm.base import EmptyResponse, LLMClient
 from moose.llm.usage import record_llm_call
 
 # A key may be given directly or as a callable, so it can be read from a keychain or
@@ -96,7 +96,7 @@ class OpenAICompatibleClient(LLMClient):
         message = choices[0].get("message") or {}
         content = message.get("content")
         if not content:
-            raise RuntimeError(f"{self.provider} response missing content")
+            raise EmptyResponse(f"{self.provider} response missing content (finish reason: {choices[0].get('finish_reason')})")
         return content
 
     async def list_models(self) -> list[str]:

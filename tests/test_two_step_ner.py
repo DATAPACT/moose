@@ -535,6 +535,34 @@ def test_the_mention_prompt_asks_for_text_in_order_not_offsets() -> None:
     assert "in the order they appear" in prompt
 
 
+@pytest.mark.asyncio
+async def test_a_chunk_the_llm_answers_nothing_for_is_split_in_two_and_tried_again() -> None:
+    from moose.llm.base import EmptyResponse
+    from moose.ner import MENTION_CHUNK_CHARS, _find_mentions
+    from moose.config import Settings
+
+    first = "Mr Luca Bianchi lives in Milan. " + "Nothing to see here. " * 20
+    second = "His sister Anna Bianchi works in Turin. " + "Nothing more here. " * 20
+    text = f"{first}\n\n{second}"
+    assert len(text) <= MENTION_CHUNK_CHARS
+
+    class _ChokesOnTheWholeText:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate(self, prompt: str) -> str:
+            self.calls += 1
+            if "Milan" in prompt and "Turin" in prompt:
+                raise EmptyResponse("reasoned until the output limit")
+            names = [n for n in ("Luca Bianchi", "Milan", "Anna Bianchi", "Turin") if n in prompt]
+            return json.dumps({"mentions": [{"text": n, "category": "x"} for n in names]})
+
+    llm = _ChokesOnTheWholeText()
+    found = await _find_mentions(text, lambda piece: f"TEXT {piece}", llm, Settings(MOOSE_MAX_RETRIES=0))
+    assert [m["text"] for m in found] == ["Luca Bianchi", "Milan", "Anna Bianchi", "Turin"]
+    assert all(text[m["start"] : m["end"]] == m["text"] for m in found) and llm.calls > 2
+
+
 def test_every_repeat_in_a_long_text_gets_its_own_span() -> None:
     from moose.ner import _Spans, _parse_mentions
 
