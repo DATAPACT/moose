@@ -54,6 +54,23 @@ could single out the applicant, while `dpv_privacy` looks for personal data and 
 Low QUASI recall is that difference, not an error; TAB measures anonymisation. Some types
 are odd (case numbers as `DeviceApplications`, names as `School`) but still personal data.
 
+### Test split
+
+30 random test documents (seed 0) with all three fixes below, frozen before the run: none
+failed, $0.24.
+
+| Masked | DIRECT recall | QUASI recall | Token precision | Mention precision |
+|---|---|---|---|---|
+| personal-data spans (`dpv-pd:*`) | 0.76 | 0.32 | 0.80 | 0.81 |
+| every annotated span | 0.88 | 0.38 | 0.72 | 0.72 |
+
+Moose finds the names (PERSON 228/243, CODE 78/82), but types 60 of them `dpv:Adult`, which
+is not masked: 33 decided by Laya alone, confidently, and 27 where the LLM was asked, 24 of
+which it answered Name and Laya, rescoring with that hint, kept Adult. That is why DIRECT
+recall is 0.76 for personal-data spans and 0.88 for every span. It is an open problem, not
+fixed here: `system1+llm` lets Laya decide after the LLM's hint by design, as calibrated on
+DPVCallBench, and changing that should be done on development data, not on this split.
+
 ## What TAB found in Moose
 
 All three are fixed in the library and covered by tests. On the first 3 documents (1, 2) and
