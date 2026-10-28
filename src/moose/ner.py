@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import json
 import re
 from typing import Any
@@ -34,7 +35,6 @@ from moose.prompts import (
 )
 from moose.schema import SchemaConfig, get_schema_config
 from moose.validate import (
-    _repair_offsets,
     extract_json,
     validate_ner_response_with_warnings,
     validate_table_response,
@@ -333,23 +333,95 @@ async def run_text_ner(
     return response
 
 
+# Longest piece of text the mention step sees at once. On longer texts the LLM loses track of
+# character offsets and drops mentions, and on a few thousand characters it returns none.
+MENTION_CHUNK_CHARS = 1500
+
+
+def _text_chunks(text: str, size: int = MENTION_CHUNK_CHARS) -> list[tuple[int, str]]:
+    """(offset, piece) windows of at most `size` characters, cut after a paragraph break,
+    else a line break, else a sentence end, else a space; pieces cover the whole text."""
+    chunks: list[tuple[int, str]] = []
+    start = 0
+    while len(text) - start > size:
+        window = text[start : start + size]
+        cut = next((i + len(sep) for sep in ("\n\n", "\n", ". ", " ") if (i := window.rfind(sep)) > size // 3), size)
+        chunks.append((start, text[start : start + cut]))
+        start += cut
+    if start < len(text):
+        chunks.append((start, text[start:]))
+    return chunks
+
+
+async def _find_mentions(text: str, schema: SchemaConfig, llm_client, settings: Settings) -> list[dict[str, Any]]:
+    """The mention step, one call per chunk of the text, with offsets into the whole text."""
+
+    async def one(offset: int, piece: str) -> list[dict[str, Any]]:
+        found = await _run_with_retries(
+            llm_client, build_mention_prompt(schema, piece), lambda raw: _parse_mentions(raw, piece), settings.MOOSE_MAX_RETRIES
+        )
+        return [{**m, "start": m["start"] + offset, "end": m["end"] + offset} for m in found]
+
+    per_chunk = await asyncio.gather(*(one(offset, piece) for offset, piece in _text_chunks(text)))
+    return [m for found in per_chunk for m in found]
+
+
+class _Spans:
+    """Non-overlapping spans placed so far, sorted, for overlap checks in O(log n)."""
+
+    def __init__(self) -> None:
+        self.starts: list[int] = []
+        self.ends: list[int] = []
+
+    def free(self, start: int, end: int) -> bool:
+        # The spans do not overlap, so their ends are sorted too: only the last span that
+        # starts before `end` can overlap [start, end).
+        i = bisect.bisect_left(self.starts, end)
+        return i == 0 or self.ends[i - 1] <= start
+
+    def add(self, start: int, end: int) -> None:
+        i = bisect.bisect_left(self.starts, start)
+        self.starts.insert(i, start)
+        self.ends.insert(i, end)
+
+
+def _locate(text: str, span: str, after: int, taken: _Spans) -> tuple[int, int] | None:
+    """Where `span` occurs: the first occurrence from `after` on that overlaps no mention
+    already placed, else the first such occurrence before it."""
+    span = span.strip()
+    if not span:
+        return None
+    for origin, stop in ((after, len(text)), (0, after)):
+        i = text.find(span, origin)
+        while i != -1 and i < stop:
+            if taken.free(i, i + len(span)):
+                return i, i + len(span)
+            i = text.find(span, i + 1)
+    return None
+
+
 def _parse_mentions(raw_text: str, text: str) -> list[dict[str, Any]]:
+    """Mentions as {"text", "category"} in order of appearance; each is placed at the next
+    occurrence of its text. Offsets the LLM still gives are used only when they are exact."""
     data = extract_json(raw_text)
     items = data.get("mentions") if isinstance(data, dict) else data
     if not isinstance(items, list):
         raise ValueError('Expected {"mentions": [...]}.')
     mentions: list[dict[str, Any]] = []
+    taken = _Spans()
+    cursor = 0
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not item["text"].strip():
             raise ValueError('Each mention needs a non-empty "text".')
         start, end = item.get("start"), item.get("end")
-        if not (isinstance(start, int) and isinstance(end, int) and text[start:end] == item["text"]):
-            repaired = _repair_offsets(text, start if isinstance(start, int) else 0, 0, item["text"])
-            if repaired is None:
-                continue  # not a substring of the input: drop rather than invent offsets
-            start, end = repaired
-        if any(start < m["end"] and m["start"] < end for m in mentions):
-            continue
+        exact = isinstance(start, int) and isinstance(end, int) and text[start:end] == item["text"]
+        if not exact or not taken.free(start, end):
+            placed = _locate(text, item["text"], cursor, taken)
+            if placed is None:
+                continue  # not a substring of the input, or every occurrence is taken: drop it
+            start, end = placed
+        cursor = end
+        taken.add(start, end)
         category = item.get("category")
         mentions.append({
             "start": start,
@@ -486,9 +558,7 @@ async def _two_step_text_task(
 ) -> dict:
     """Find and describe mentions, retrieve candidates for each, then choose among them."""
     text = task["text"]
-    mentions = await _run_with_retries(
-        llm_client, build_mention_prompt(schema, text), lambda raw: _parse_mentions(raw, text), settings.MOOSE_MAX_RETRIES
-    )
+    mentions = await _find_mentions(text, schema, llm_client, settings)
     index = candidate_index(schema)
     for mention in mentions:
         mention["candidates"] = index.top_k(f"{mention['category']} {mention['text']}", schema.candidate_k)
