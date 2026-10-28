@@ -50,6 +50,7 @@ probability against that.
 | CPA validation, after (same tables) | 710 | 0.448 | 0.43 | 0.49 | $1.13 |
 | CPA test, after (50 tables) | 176 | 0.375 | 0.49 | 0.49 | $0.32 |
 | CPA validation, table shortlists (50 of the same tables) | 204 | **0.627** | 0.26 | 0.46 | $0.20 |
+| CPA test, table shortlists (the same 50 test tables) | 176 | **0.602** | 0.25 | 0.47 | $0.19 |
 
 On the columns the old label sets could already score, validation went from 0.528 to 0.575
 (CTA) and from 0.421 to 0.436 (CPA). The changes:
@@ -68,7 +69,7 @@ shared the first one's shortlist; it often dropped the right property, and `moos
 was the most common answer. Now one call shortlists every target column, seeing the whole
 table and the subject's class, and one call decides all of them, each with its shortlist. On
 the same 50 tables: accuracy 0.451 → 0.627, `moose:OTHER` answers 58 → 4, cost $0.37 → $0.20
-(3 LLM calls per table).
+(3 LLM calls per table). On the same 50 test tables it holds: 0.375 → 0.602.
 
 Laya's probabilities are not calibrated on tables (ECE 0.19–0.49, AUROC about 0.5 for CPA),
 so table results keep `"calibrated": false`.
