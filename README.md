@@ -460,14 +460,32 @@ curl -sS -X POST "http://localhost:8000/privacy/analyze" \
   }'
 ```
 
-### 7) Poll a job
+### 7) Anonymisation
+
+Masks what could identify a person: names and ID numbers (DIRECT), and the dates, places,
+employers and other details that could identify them together (QUASI). The result has the
+mentions with their decision and `masked_text`, with one placeholder per entity.
+
+```bash
+curl -sS -X POST "http://localhost:8000/anonymise" \
+  -H "X-API-Key: test-dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text":"On 3 May 2021 Ms Anna Berg, a nurse at St Olav'"'"'s Hospital in Trondheim, complained to the Norwegian Data Protection Authority.",
+    "protect":"Ms Berg"
+  }'
+```
+
+`protect` says whom to protect; without it, every private individual in the text.
+
+### 8) Poll a job
 
 ```bash
 curl -sS "http://localhost:8000/jobs/<job_id>" \
   -H "X-API-Key: test-dev-key"
 ```
 
-### 8) Get machine-readable privacy report from a completed privacy job
+### 9) Get machine-readable privacy report from a completed privacy job
 
 ```bash
 curl -sS "http://localhost:8000/jobs/<job_id>/privacy-report" \

@@ -92,3 +92,18 @@ def test_sync_calls_share_one_event_loop() -> None:
     llm = _LoopBound(*[{"mentions": [mention]}, {"choices": [{"mention": 0, "type_id": "dpv-pd:Name"}]}] * 2)
     annotator = Annotator(llm)
     assert annotator.annotate_text(TEXT)["entities"] and annotator.annotate_text(TEXT)["entities"]
+
+
+def test_anonymise_masks_and_reports_usage() -> None:
+    text = "Mr Smith moved to Leeds in 1994."
+    llm = _LLM(
+        {"mentions": [{"text": "Mr Smith", "category": "PERSON"}, {"text": "Leeds", "category": "LOC"},
+                      {"text": "1994", "category": "DATETIME"}]},
+        {"decisions": [{"entity": 0, "identifier_type": "DIRECT"}, {"entity": 1, "identifier_type": "QUASI"},
+                       {"entity": 2, "identifier_type": "NO_MASK"}]},
+    )
+    annotator = Annotator(llm)
+    result = annotator.anonymise(text, protect="Mr Smith")
+    assert result["masked_text"] == "[PERSON_1] moved to [LOC_1] in 1994."
+    assert [e["identifier_type"] for e in result["entities"]] == ["DIRECT", "QUASI", "NO_MASK"]
+    assert annotator.last_usage is not None and annotator.last_usage.requested_model == "test-model"
