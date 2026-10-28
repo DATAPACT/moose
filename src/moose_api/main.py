@@ -209,6 +209,26 @@ class PrivacyTableTaskIn(BaseModel):
 PrivacyTaskIn = Annotated[Union[PrivacyTextTaskIn, PrivacyTableTaskIn], Field(discriminator="kind")]
 
 
+class AnonymiseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    llm: LLMOptions = Field(default_factory=LLMOptions)
+    text: str = Field(min_length=1)
+    protect: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Whom to protect, in words (default: the text's private individuals).",
+        examples=["the applicant", "the customer"],
+    )
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("text must be non-empty.")
+        return value
+
+
 class PrivacyAnalyzeRequest(BaseModel):
     # NEW: profile support (fast/balanced/deep)
     profile: str | None = None
@@ -835,6 +855,19 @@ async def submit_schema_tabular_cpa(
         "debug_preview_limit": request.debug_preview_limit,
     }
     job_id = await _enqueue_job("cpa", payload, request.llm)
+    return JobQueuedResponse(job_id=job_id, status="queued")
+
+
+# ------------------------
+# Anonymisation API
+# ------------------------
+@app.post("/anonymise", dependencies=[Depends(require_api_key)], tags=["Privacy"], response_model=JobQueuedResponse)
+async def submit_anonymise(
+    request: AnonymiseRequest,
+):
+    """Find what could identify a person (DIRECT and QUASI identifiers), decide what to mask,
+    and return the masked text. See docs/design/anonymisation.md."""
+    job_id = await _enqueue_job("anonymise", {"text": request.text, "protect": request.protect}, request.llm)
     return JobQueuedResponse(job_id=job_id, status="queued")
 
 

@@ -38,8 +38,8 @@ moose = Annotator(OpenRouterClient(api_key=os.environ["OPENROUTER_API_KEY"], mod
 result = moose.annotate_text("Agent: Thanks, Luca Bianchi. Your customer ID is USR 661 204.")
 for e in result["entities"]:
     print(e["text"], e["type_id"], e["confidence"], e["decided_by"])
-# Luca Bianchi  dpv-pd:Identifier  0.49  system1+llm
-# USR 661 204   dpv-pd:Identifier  0.81  system1
+# Luca Bianchi  dpv-pd:Identifier  0.72  system1
+# USR 661 204   dpv-pd:Identifier  0.79  system1
 
 print(moose.last_usage.calls, moose.last_usage.cost_usd)  # LLM calls and cost of that call
 ```
@@ -68,6 +68,7 @@ llm = OpenRouterClient(api_key=lambda: keyring.get_password("moose", "openrouter
 | `annotate_table(rows, schema="dpv_privacy")` | sample rows (dicts of column → value) | a type per column |
 | `column_relationships(rows, subject_column, schema="cpa")` | sample rows | the relation from the subject column to each other column |
 | `analyze_privacy(text=... or rows=...)` | a text or a table | findings and recommended actions (GDPR policy pack) |
+| `anonymise(text, protect=None)` | a text | what could identify a person, and the text with it masked |
 | `schemas()` | | available schemas |
 | `add_schema(payload)`, `remove_schema(name)` | your own vocabulary | bring your own schema |
 
@@ -87,6 +88,38 @@ Results have the same shape as the REST API's job results.
 - **`cpa`, `schemaorg_cpa_v1`:** column relationships.
 - Your own schemas: see `add_schema`. They are stored under `MOOSE_USER_DATA_DIR`, by
   default `~/.moose`.
+
+### Anonymisation
+
+`anonymise` finds everything in a text that could identify a person, directly (a name, an
+ID number) or together with other details (a date, a place, an employer, an age), decides
+what to mask, and masks it with one placeholder per entity:
+
+```python
+text = ("On 3 May 2021 Ms Anna Berg, a 52-year-old nurse at St Olav's Hospital in Trondheim, "
+        "complained to the Norwegian Data Protection Authority that her employer had shared her "
+        "sick-leave records with an insurer.")
+result = moose.anonymise(text, protect="Ms Berg")  # default: the text's private individuals
+print(result["masked_text"])
+# On [DATETIME_1] [PERSON_1], a [DEM_1] [DEM_2] at [ORG_1] in [LOC_1], complained to the
+# Norwegian Data Protection Authority that her employer had shared her sick-leave records
+# with an insurer.
+for e in result["entities"]:
+    print(e["text"], e["category"], e["identifier_type"])
+# 3 May 2021  DATETIME  QUASI
+# Ms Anna Berg  PERSON  DIRECT
+# ...
+# Norwegian Data Protection Authority  ORG  NO_MASK
+```
+
+- Every mention has a `category` (PERSON, CODE, LOC, ORG, DEM, DATETIME, QUANTITY, MISC),
+  an `identifier_type` (DIRECT, QUASI or NO_MASK) and an `entity` number shared by the
+  mentions of the same text, which are decided together.
+- It makes 1 LLM call per 1,500 characters to find mentions and 1 per text to decide.
+- On TAB, 30 court cases: 98% of direct and 75% of quasi identifiers masked, with 82% of
+  masked text rightly masked (`research/tab_eval`, `docs/design/anonymisation.md`).
+- Not yet: probabilities (`"confidence": null`, `"calibrated": false`) and languages other
+  than English.
 
 ## Probabilities
 

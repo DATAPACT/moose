@@ -83,3 +83,35 @@ def test_decisions_must_name_listed_entities_and_known_types() -> None:
         _parse_decisions('{"decisions": [{"entity": 2, "identifier_type": "QUASI"}]}', 2)
     with pytest.raises(ValueError, match="must be one of"):
         _parse_decisions('{"decisions": [{"entity": 0, "identifier_type": "MAYBE"}]}', 2)
+
+
+@pytest.mark.asyncio
+async def test_the_api_worker_runs_an_anonymise_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    from moose.config import Settings
+    from moose.llm import OpenAICompatibleClient
+    from moose_api.queue import InMemoryJobStore, InMemoryQueue, JobRecord, WorkerPool
+    from moose_api.vault_store import ProviderRoute
+
+    answers = [
+        {"mentions": [{"text": "Mr Smith", "category": "PERSON"}]},
+        {"decisions": [{"entity": 0, "identifier_type": "DIRECT"}]},
+    ]
+
+    async def fake_generate(self, prompt: str) -> str:
+        assert ("so that the applicant cannot be identified" in prompt) == (len(answers) == 1)
+        return json.dumps(answers.pop(0))
+
+    monkeypatch.setattr(OpenAICompatibleClient, "generate", fake_generate)
+    store = InMemoryJobStore()
+    pool = WorkerPool(InMemoryQueue(10), store, None, Settings(_env_file=None, MOOSE_WORKER_COUNT=0, MOOSE_MAX_RETRIES=0))
+    await store.put_job(JobRecord(
+        job_id="a1", endpoint_type="anonymise",
+        payload={"text": "Mr Smith appealed.", "protect": "the applicant", "llm": {"model": "x/y", "key_id": "k1"}},
+        status="queued", created_at="now", updated_at="now", retries=0, client="user:u1",
+    ))
+    route = ProviderRoute(provider="openrouter", base_url="https://openrouter.ai/api/v1", api_key="sk-test", secret_id="k1")
+    await pool._process_job("a1", route)
+
+    job = await store.get_job("a1")
+    assert job.status == "completed", job.error
+    assert job.result["masked_text"] == "[PERSON_1] appealed." and job.result["entities"][0]["identifier_type"] == "DIRECT"

@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
+from moose.anonymise import anonymise
 from moose.config import Settings
 from moose.cpa import run_table_cpa
 from moose.ingest import ingest_schema_payload
@@ -435,6 +436,13 @@ class WorkerPool:
                         settings=self._settings,
                     )
                     result = _unwrap_single_tabular_ner_result(raw)
+
+                elif job.endpoint_type == "anonymise":
+                    if llm_client is None:
+                        raise RuntimeError(no_llm_reason)
+                    result = await anonymise(
+                        job.payload["text"], llm_client, protect=job.payload.get("protect"), settings=self._settings
+                    )
 
                 elif job.endpoint_type == "privacy_analyze":
                     if llm_client is None:

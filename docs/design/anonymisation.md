@@ -1,7 +1,8 @@
 # Design: an anonymisation mode
 
-Status: steps 1 and 2 implemented in `moose.anonymise` (`find_identifiers`, `anonymise`), with
-`"confidence": null` and `"calibrated": false`; steps 3 (API, docs) and 4 (Laya, calibration) are not.
+Status: steps 1-3 implemented: `Annotator.anonymise`, `POST /anonymise`, documented in
+`docs/library.md` and the README, with `"confidence": null` and `"calibrated": false`. Step 4
+(Laya's probability and its calibration) is not.
 
 ## Why
 

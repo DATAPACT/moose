@@ -21,6 +21,7 @@ import asyncio
 import threading
 from typing import Any, Awaitable, Literal, TypeVar
 
+from moose.anonymise import anonymise
 from moose.config import Settings
 from moose.cpa import run_table_cpa
 from moose.llm.base import LLMClient
@@ -86,6 +87,15 @@ class Annotator:
 
     def annotate_text(self, text: str, schema: str = "dpv_privacy", linker: Linker | None = None) -> dict[str, Any]:
         return self._loop.run(self.aannotate_text(text, schema, linker))
+
+    async def aanonymise(self, text: str, protect: str | None = None) -> dict[str, Any]:
+        """What could identify `protect` (by default the text's private individuals), and the
+        text with it masked: {"entities": [...], "masked_text": str}. Each entity is a mention
+        with its category, identifier_type (DIRECT, QUASI or NO_MASK) and entity number."""
+        return await self._tracked(anonymise(text, self.llm, protect=protect, settings=self.settings))
+
+    def anonymise(self, text: str, protect: str | None = None) -> dict[str, Any]:
+        return self._loop.run(self.aanonymise(text, protect))
 
     # Tables -------------------------------------------------------------------------
 
