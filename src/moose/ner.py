@@ -34,7 +34,6 @@ from moose.prompts import (
 )
 from moose.schema import SchemaConfig, get_schema_config
 from moose.validate import (
-    _repair_offsets,
     extract_json,
     validate_ner_response_with_warnings,
     validate_table_response,
@@ -366,23 +365,36 @@ async def _find_mentions(text: str, schema: SchemaConfig, llm_client, settings: 
     return [m for found in per_chunk for m in found]
 
 
+def _locate(text: str, span: str, after: int, taken: list[dict[str, Any]]) -> tuple[int, int] | None:
+    """Where `span` occurs: the first occurrence from `after` on that overlaps no mention
+    already placed, else the first such occurrence anywhere."""
+    span = span.strip()
+    starts = [i for i in range(len(text)) if text.startswith(span, i)] if span else []
+    free = [i for i in starts if not any(i < m["end"] and m["start"] < i + len(span) for m in taken)]
+    best = next((i for i in free if i >= after), free[0] if free else None)
+    return None if best is None else (best, best + len(span))
+
+
 def _parse_mentions(raw_text: str, text: str) -> list[dict[str, Any]]:
+    """Mentions as {"text", "category"} in order of appearance; each is placed at the next
+    occurrence of its text. Offsets the LLM still gives are used only when they are exact."""
     data = extract_json(raw_text)
     items = data.get("mentions") if isinstance(data, dict) else data
     if not isinstance(items, list):
         raise ValueError('Expected {"mentions": [...]}.')
     mentions: list[dict[str, Any]] = []
+    cursor = 0
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not item["text"].strip():
             raise ValueError('Each mention needs a non-empty "text".')
         start, end = item.get("start"), item.get("end")
-        if not (isinstance(start, int) and isinstance(end, int) and text[start:end] == item["text"]):
-            repaired = _repair_offsets(text, start if isinstance(start, int) else 0, 0, item["text"])
-            if repaired is None:
-                continue  # not a substring of the input: drop rather than invent offsets
-            start, end = repaired
-        if any(start < m["end"] and m["start"] < end for m in mentions):
-            continue
+        exact = isinstance(start, int) and isinstance(end, int) and text[start:end] == item["text"]
+        if not exact or any(start < m["end"] and m["start"] < end for m in mentions):
+            placed = _locate(text, item["text"], cursor, mentions)
+            if placed is None:
+                continue  # not a substring of the input, or every occurrence is taken: drop it
+            start, end = placed
+        cursor = end
         category = item.get("category")
         mentions.append({
             "start": start,

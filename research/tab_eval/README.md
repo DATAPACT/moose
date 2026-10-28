@@ -22,40 +22,50 @@ PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --split dev --docs 15
 - Each run writes `runs/<split>_<model>[_<tag>]/report.json` and caches Moose's output per
   document (`raw.jsonl`), so a rerun only annotates the documents still missing.
 - `--max-cost` (USD, $0.50 by default) stops starting new documents once spent. A court case
-  costs about $0.03 with `gpt-oss-120b` (6-8 LLM calls).
+  costs about $0.008 with `gpt-oss-120b` (6-8 LLM calls).
 - Keep `--concurrency` low (2-3): each document already runs its chunks in parallel.
 
 ## Results
 
-Dev split, 13 of 15 random documents (seed 0; 2 failed, see below), `gpt-oss-120b`, $0.33.
+Dev split, 15 random documents (seed 0), `gpt-oss-120b`, $0.11.
 
 | Masked | DIRECT recall | QUASI recall | Token precision | Mention precision |
 |---|---|---|---|---|
-| personal-data spans (`dpv-pd:*`) | 0.89 | 0.19 | 0.85 | 0.87 |
-| every annotated span | 0.91 | 0.22 | 0.62 | 0.66 |
+| personal-data spans (`dpv-pd:*`) | 0.90 | 0.36 | 0.81 | 0.80 |
+| every annotated span | 0.91 | 0.38 | 0.69 | 0.72 |
 
 Gold mentions of each TAB type (first annotator, DIRECT and QUASI) that Moose found, and the
 types it gave them:
 
 | TAB type | Found | Moose's types |
 |---|---|---|
-| PERSON | 65/65 | Name 28, Identifier 27, `dpv:Adult` 7 |
-| CODE | 18/69 | Identifier 15 |
-| ORG | 22/64 | DataController 10, DataProcessor 5 (roles, not masked) |
-| DATETIME | 26/255 | BirthDate 17 |
-| MISC | 4/47 | |
-| LOC | 6/42 | Locality 5 |
-| DEM | 5/39 | Nationality 4 |
-| QUANTITY | 3/34 | |
+| PERSON | 94/100 | Name 55, Identifier 17, School 8 |
+| CODE | 71/71 | Identifier 52, DeviceApplications 13 |
+| ORG | 8/65 | DataProcessor 4, DataController 2 (roles, not masked) |
+| DATETIME | 38/297 | BirthDate 25 |
+| LOC | 7/50 | BirthPlace 2, Locality 2, City 2 |
+| MISC | 12/47 | PhysicalTrait 7 |
+| DEM | 10/45 | Nationality 6 |
+| QUANTITY | 7/35 | Financial 4 |
 
 Names and case numbers, what `dpv_privacy` is for, are found. Most QUASI identifiers are
 outside its scope: TAB masks every event date, place, amount, organisation and injury that
 could single out the applicant, while `dpv_privacy` looks for personal data and privacy roles.
-Low QUASI recall is that difference, not an error; TAB measures anonymisation.
+Low QUASI recall is that difference, not an error; TAB measures anonymisation. Some types
+are odd (case numbers as `DeviceApplications`, names as `School`) but still personal data.
 
 ## What TAB found in Moose
 
-Both are fixed in the library and covered by tests:
+All three are fixed in the library and covered by tests. On the first 3 documents (1, 2) and
+on the 13 documents both later runs completed (3), for personal-data spans:
+
+| Change | DIRECT recall | QUASI recall | Token precision | Cost per document |
+|---|---|---|---|---|
+| before (3 documents) | 0 | 0 | | $0.003 |
+| 1. mentions found per chunk | 0.19 | 0.04 | 0.73 | $0.031 |
+| 2. Laya sees the text around a mention | 0.56 | 0.10 | 0.86 | $0.031 |
+| (13 documents) with 1 and 2 | 0.89 | 0.19 | 0.85 | $0.026 |
+| 3. mentions given as text, not offsets | 0.93 | 0.36 | 0.79 | $0.007 |
 
 1. **Long texts got no annotations.** The mention step asked for every mention of the whole
    text in one call; on a court case (7,000-8,000 characters) `gpt-oss-120b` returned none,
@@ -64,16 +74,14 @@ Both are fixed in the library and covered by tests:
 2. **Laya never saw mentions in long texts.** Laya reads 512 tokens with the text first, so
    in a long text the mention was cut off and every mention of a document got the same
    scores: all names became `dpv:Adult`. Laya now sees 800 characters around a mention in a
-   longer text (`moose.linkers.LAYA_CONTEXT_CHARS`). On the first 3 documents, DIRECT recall
-   of personal-data spans went 0.19 → 0.56, token precision 0.73 → 0.86.
-
-Texts under 800 characters, such as DPVCallBench's calls (at most 121), are annotated as
-before, so its calibration still holds.
-
-## Open problem
-
-`gpt-oss-120b` spends 6,000-15,000 reasoning tokens per chunk, mostly counting character
-offsets that Moose then repairs by searching for the mention's text anyway. On some chunks it
-reasons until its 40,000-token limit and answers nothing; Moose does not retry an empty
-answer, so the document fails (2 of 15 here). Asking for the mention's text without offsets
-would likely cut the cost of long texts and remove these failures.
+   longer text (`moose.linkers.LAYA_CONTEXT_CHARS`). Texts under 800 characters, such as
+   DPVCallBench's calls (at most 121), are given to Laya as before.
+3. **The LLM spent its reasoning counting characters.** The mention step asked for character
+   offsets, which Moose then corrected by searching for the mention's text anyway.
+   `gpt-oss-120b` spent 6,000-15,000 reasoning tokens per chunk on them, and on some chunks
+   reasoned to its 40,000-token limit and answered nothing (2 of 15 documents failed). It
+   now lists each mention's text in order of appearance, a repeated value each time, and
+   Moose places each at the next occurrence. Long texts cost about a quarter as much, none
+   failed, and repeated names and case numbers are now all found. On 40 DPVCallBench dev
+   records the mention step finds the same spans (strict recall 0.972 both, precision 0.986
+   → 1.000) at half the cost.

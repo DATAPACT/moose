@@ -507,3 +507,31 @@ def test_laya_sees_the_text_around_a_mention_in_a_long_text() -> None:
     # Short texts, and items without a position (table columns), keep the whole context.
     assert laya_inputs(TEXT, {**item, "start": 0, "end": 4})[0].startswith(f'Call transcript: "{TEXT}"')
     assert long_text in laya_inputs(long_text, {"text": "x", "candidates": candidates})[0]
+
+
+def test_mentions_without_offsets_are_placed_in_order_and_each_repeat_gets_its_own_span() -> None:
+    from moose.ner import _parse_mentions
+
+    text = "Mr Rossi met Ms Bianchi. Later, Mr Rossi called Ms Bianchi and then Mr Rossi left."
+    raw = json.dumps({"mentions": [
+        {"text": "Rossi", "category": "person name"}, {"text": "Bianchi", "category": "person name"},
+        {"text": "Rossi", "category": "person name"}, {"text": "Bianchi", "category": "person name"},
+        {"text": "Rossi", "category": "person name"}, {"text": "Verdi", "category": "person name"},
+    ]})
+    mentions = _parse_mentions(raw, text)
+    rossi = [i for i in range(len(text)) if text.startswith("Rossi", i)]
+    assert [m["start"] for m in mentions if m["text"] == "Rossi"] == rossi
+    assert len(mentions) == 5 and all(text[m["start"] : m["end"]] == m["text"] for m in mentions)
+    # A repeat listed out of order still gets a free occurrence; one too many is dropped.
+    out_of_order = json.dumps({"mentions": [{"text": "Bianchi"}, {"text": "Bianchi"}, {"text": "Rossi"}, {"text": "Bianchi"}]})
+    placed = _parse_mentions(out_of_order, text)
+    bianchi = [i for i in range(len(text)) if text.startswith("Bianchi", i)]
+    assert [m["start"] for m in placed] == [*bianchi, rossi[2]]
+
+
+def test_the_mention_prompt_asks_for_text_in_order_not_offsets() -> None:
+    from moose.prompts import build_mention_prompt
+
+    prompt = build_mention_prompt(get_schema_config("dpv_privacy"), "We collect email addresses.")
+    assert '"start"' not in prompt and "do not give character offsets" in prompt
+    assert "in the order they appear" in prompt
