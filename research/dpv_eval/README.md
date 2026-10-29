@@ -184,16 +184,23 @@ candidates as the "LLM decides" run, so they differ only in who chooses.
 | Direct LLM, closed prompt (21 labels + definitions + rules) | 0.888 | 0.818 | 0.921 | – |
 | Moose, the 21 labels as a schema (one step) | 0.824 | 0.780 | – | – |
 | **Moose `dpv_privacy`, two-step, LLM decides** | **0.900** | **0.855** | **0.950** | 0.029³ |
-| Moose `dpv_privacy`, fine-tuned Laya alone | 0.900 | 0.794 | 0.882 | 0.179 |
-| Moose `dpv_privacy`, zero-shot Laya, LLM below 0.6 | 0.900 | 0.790 | 0.878 | 0.108 |
+| Moose `dpv_privacy`, fine-tuned Laya alone | 0.900 | 0.794 | 0.882 | 0.179 → 0.311⁴ |
+| Moose `dpv_privacy`, zero-shot Laya, LLM below 0.6 | 0.900 | 0.790 → **0.851**⁴ | 0.878 → **0.946**⁴ | 0.108 → **0.095**⁴ |
 | Moose `dpv_pd`, LLM decides | 0.789 | 0.733 | 0.930 | 0.054³ |
-| Moose `dpv_pd`, fine-tuned Laya alone | 0.789 | 0.715 | 0.906 | 0.198 |
-| Moose `dpv_pd`, zero-shot Laya, LLM below 0.9 | 0.789 | 0.685 | 0.869 | 0.157 |
+| Moose `dpv_pd`, fine-tuned Laya alone | 0.789 | 0.715 | 0.906 | 0.198 → 0.293⁴ |
+| Moose `dpv_pd`, zero-shot Laya, LLM below 0.9 | 0.789 | 0.685 → 0.696⁴ | 0.869 → 0.883⁴ | 0.157 → **0.090**⁴ |
 | Moose `dpv`, two-step, LLM decides | 0.649 | 0.519 (0.592 values only) | 0.800 | 0.18³ |
 
 ¹ After mapping finer DPV concepts up to the benchmark's. ² On predicted spans matching a
 gold span. ³ The LLM's stated confidence (reported as not calibrated); on dev it was
 0.20–0.36.
+⁴ Before → after `dpv-pd:Name` got a clearer definition in Moose (DPV's own is "information
+about names", next to Identifier's "an identifier or name used for identification"), so
+that Laya stops typing names Identifier. Rescored on the same cached mentions and LLM
+choices, no LLM calls (`system1_eval.py --name namefix_...`). With it, the default linker
+(zero-shot Laya, consulting the LLM below 0.6) is about as good as the LLM deciding on
+`dpv_privacy` (0.851 against 0.855) and better calibrated. The fine-tuned Laya, trained
+with the old definition and not shipped, keeps its accuracy but loses calibration.
 
 - **Moose's two-step `dpv_privacy` with the LLM deciding beats the direct closed prompt**
   (0.855 against 0.818), although the direct prompt knows the benchmark's 21 answers.
@@ -301,8 +308,10 @@ Two changes made Laya competitive on its own:
 - **The suggestion makes Laya's probability rank less well (AUROC 0.90 → 0.81).** Laya
   leans towards the LLM's answer, right or wrong. For ranking items by risk, `system1`
   alone gives the sharper signal.
-- **Laya's remaining weakness is names.** Zero-shot, it often prefers `Identifier` to
-  `Name`. This is the first thing fine-tuning should fix (Colab notebook in `colab/`).
+- **Laya's weakness was names.** Zero-shot, it often preferred `Identifier` to `Name`,
+  because of DPV's wording. Moose now gives `dpv-pd:Name` a clearer definition
+  (`moose.schema.DEFINITION_CLARIFICATIONS`): all 53 names in train are typed Name, and
+  test accuracy rose from 0.878 to 0.946 (see the test table).
 - **Tables use the same mechanism,** with column descriptions instead of mentions. There
   is no labelled table data yet, so table probabilities are reported as not calibrated.
 
