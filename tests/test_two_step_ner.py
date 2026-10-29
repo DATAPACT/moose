@@ -574,3 +574,9 @@ def test_every_repeat_in_a_long_text_gets_its_own_span() -> None:
     spans.add(10, 20)
     spans.add(30, 40)
     assert spans.free(20, 30) and not spans.free(15, 25) and not spans.free(5, 11) and spans.free(0, 10)
+
+
+def test_every_dpv_schema_defines_a_name_as_a_persons_name_not_a_code() -> None:
+    for schema in ("dpv_privacy", "dpv_pd", "dpv"):
+        records = {r["id"]: r for r in get_schema_config(schema).load_type_records()}
+        assert records["dpv-pd:Name"]["definition"].startswith("The name of a person"), schema

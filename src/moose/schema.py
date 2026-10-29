@@ -257,6 +257,17 @@ def _concept_files(directory: Path) -> tuple[dict[str, dict[str, Any]], dict[str
     return concepts, parents
 
 
+# Definitions that replace the source's where it misleads. DPV defines dpv-pd:Identifier as
+# "an identifier or name used for identification" and dpv-pd:Name only as "information about
+# names", so Laya typed 46 of 53 names in DPVCallBench's train split something else (39
+# Identifier); with this one it types all 53 Name, and identifiers as before. On the test
+# split, dpv_privacy's system1 accuracy went 0.81 -> 0.94 and system1+llm 0.88 -> 0.95, with
+# ECE 0.15 -> 0.10 and 0.11 -> 0.10.
+DEFINITION_CLARIFICATIONS = {
+    "dpv-pd:Name": "The name of a person (given name, surname, full name or nickname), not a number or code",
+}
+
+
 @lru_cache
 def _load_type_records(path: Path) -> tuple[dict[str, Any], ...]:
     """Types with label, alternative labels, definition and parents. Bare type ids are
@@ -285,7 +296,7 @@ def _load_type_records(path: Path) -> tuple[dict[str, Any], ...]:
             "id": item["id"],
             "label": _first_text(item, ("label", "name", "title")) or item["id"],
             "alt_labels": [a for a in alt if isinstance(a, str)] if isinstance(alt, list) else [],
-            "definition": _first_text(item, ("definition", "description", "comment")),
+            "definition": DEFINITION_CLARIFICATIONS.get(item["id"]) or _first_text(item, ("definition", "description", "comment")),
             "parents": [p for p in item.get("parents") or parents.get(item["id"], []) if isinstance(p, str)],
         })
     return tuple(records)
