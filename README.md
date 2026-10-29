@@ -476,7 +476,9 @@ curl -sS -X POST "http://localhost:8000/anonymise" \
   }'
 ```
 
-`protect` says whom to protect; without it, every private individual in the text.
+`protect` says whom to protect; without it, every private individual in the text. With Laya,
+each mention also has a `confidence` that its decision is right, calibrated on TAB's court
+cases.
 
 ### 8) Poll a job
 

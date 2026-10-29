@@ -229,6 +229,17 @@ class LayaScorer:
                 out.append(float(self._agent.predict(state, questions)["answers"]["verdict"]["probabilities"]["yes"]))
         return out
 
+    def _ask_sync(self, inputs: list[tuple[str, dict[str, Any]]]) -> list[dict[str, float]]:
+        with self._lock:
+            return [
+                {k: float(p) for k, p in next(iter(self._agent.predict(state, questions)["answers"].values()))["probabilities"].items()}
+                for state, questions in inputs
+            ]
+
+    async def ask(self, inputs: list[tuple[str, dict[str, Any]]]) -> list[dict[str, float]]:
+        """Laya's answer to each (state, one question): the probability of each option."""
+        return await asyncio.to_thread(self._ask_sync, inputs)
+
     async def verify(
         self, context: str, items: list[dict[str, Any]], records: list[dict[str, Any]], prompt: Prompt = TEXT_PROMPT
     ) -> list[float]:

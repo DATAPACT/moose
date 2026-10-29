@@ -4,15 +4,21 @@
    Benchmark, annotates, whether or not it will need masking (find_identifiers).
 2. Decide, once per document, which entities to mask: DIRECT, QUASI or NO_MASK for each
    distinct mention text, applied to all its mentions; then mask them (anonymise).
+3. With Laya installed, a confidence for each decision: Laya's answer to "must this be
+   masked?", combined with the entity's category and the decision by weights fitted on TAB
+   (CALIBRATION_PATH; research/tab_eval/fit_mask_calibration.py).
 """
 
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from moose.config import Settings, get_settings
+from moose.linkers import Calibration, LinkerUnavailable, _laya_context, get_scorer, system1_ready
 from moose.ner import _find_mentions, _run_with_retries
+from moose.schema import DATA_DIR
 from moose.validate import extract_json
 
 # TAB's categories, described in our words. Every mention gets one of them.
@@ -161,6 +167,55 @@ def _parse_decisions(raw_text: str, count: int) -> dict[int, str]:
     return decisions
 
 
+def laya_mask_inputs(text: str, mention: dict[str, Any], protect: str, hint: bool | None = None) -> tuple[str, dict[str, Any]]:
+    """Laya's state and yes/no question: must this mention be masked to protect `protect`?
+    `hint` is the LLM's decision (masked or not), given to Laya as evidence."""
+    state = f'Text: "{_laya_context(text, mention)}"\nMention: "{mention["text"]}" (described as: {mention["category"]})'
+    if hint is not None:
+        state += f"\nAn LLM suggested: {'mask it' if hint else 'leave it'}"
+    criteria = {
+        "yes": "Yes, mask it: it could identify them, alone or together with other details in the text",
+        "no": "No, leave it: it is general or public (a country, a national authority, a legal reference, a vague time)",
+    }
+    return state, {"mask": {"type": "choice", "instructions": f"Must the mention be masked to protect {protect}?", "criteria": criteria}}
+
+
+CALIBRATION_PATH = DATA_DIR / "anonymise" / "laya_calibration.json"
+
+
+def decision_key(category: str, masked: bool) -> str:
+    return f"{category}:{'mask' if masked else 'leave'}"
+
+
+def laya_logit(p_mask: float, masked: bool) -> float:
+    """Log-odds of Laya's probability that the decision (masked or not) is right."""
+    p = min(max(p_mask if masked else 1 - p_mask, 1e-4), 1 - 1e-4)
+    return math.log(p / (1 - p))
+
+
+async def _confidences(text: str, entities: list[dict[str, Any]], protect: str) -> tuple[list[float | None], bool]:
+    """Each entity's probability that its decision is right, and whether that probability was
+    checked on labelled data. None without Laya or the calibration file."""
+    none: list[float | None] = [None] * len(entities)
+    if not entities or not CALIBRATION_PATH.exists():
+        return none, False
+    data = json.loads(CALIBRATION_PATH.read_text(encoding="utf-8"))
+    calibration = Calibration(model=data["model"])
+    if not system1_ready(calibration):
+        return none, False
+    try:
+        scorer = await get_scorer(calibration.model)
+    except LinkerUnavailable:
+        return none, False
+    answers = await scorer.ask([laya_mask_inputs(text, e["mentions"][0], protect) for e in entities])
+    out: list[float | None] = []
+    for entity, answer in zip(entities, answers):
+        masked = entity["identifier_type"] in MASKED
+        z = data["weights"].get(decision_key(entity["category"], masked), 0.0) + data["laya_weight"] * laya_logit(answer["yes"], masked)
+        out.append(round(1 / (1 + math.exp(-z)), 4))
+    return out, "text" in data.get("validated_for", ())
+
+
 def mask(text: str, entities: list[dict[str, Any]]) -> str:
     """The text with every masked entity's mentions replaced by one placeholder per entity,
     numbered per category in order of first appearance: [PERSON_1], [DATETIME_2]."""
@@ -202,8 +257,9 @@ async def decide_and_mask(
         )
         for i, entity in enumerate(batch):
             entity["identifier_type"] = decisions.get(i, "QUASI")  # not decided: mask, to be safe
+    confidences, calibrated = await _confidences(text, entities, protect)
     mentions = [
-        {**m, "identifier_type": e["identifier_type"], "entity": n, "confidence": None, "calibrated": False}
-        for n, e in enumerate(entities) for m in e["mentions"]
+        {**m, "identifier_type": e["identifier_type"], "entity": n, "confidence": c, "calibrated": calibrated and c is not None}
+        for n, (e, c) in enumerate(zip(entities, confidences)) for m in e["mentions"]
     ]
     return {"entities": sorted(mentions, key=lambda m: m["start"]), "masked_text": mask(text, entities)}

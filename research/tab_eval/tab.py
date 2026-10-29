@@ -167,7 +167,7 @@ def _api_key() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--split", choices=("dev", "test"), default="dev")
+    parser.add_argument("--split", choices=("train", "dev", "test"), default="dev")
     parser.add_argument("--mode", choices=("dpv_privacy", "anonymise"), default="dpv_privacy",
                         help="anonymise: moose.anonymise, protecting the applicant ('all' masks every mention found)")
     parser.add_argument("--docs", type=int, default=15, help="random documents of the split")

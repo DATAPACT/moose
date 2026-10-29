@@ -19,6 +19,12 @@ if all its mentions are masked) and token precision.
 PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --split dev --docs 15
 # moose.anonymise (docs/design/anonymisation.md), protecting the applicant
 PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --mode anonymise --split dev --docs 15
+# The confidence of its decisions: Laya's scores on a train and a test run, then the fit
+# (echr_train.json under data/ too; 90 train cases cost $1.59)
+PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --mode anonymise --split train --docs 90 --max-cost 2
+PYTHONPATH=../../src ../.venv-laya/bin/python laya_mask.py runs/anonymise_train_openai_gpt-oss-120b --split train
+PYTHONPATH=../../src ../.venv-laya/bin/python laya_mask.py runs/anonymise_test_openai_gpt-oss-120b --split test
+PYTHONPATH=../../src ../.venv-laya/bin/python fit_mask_calibration.py --write
 ```
 
 - Each run writes `runs/<split>_<model>[_<tag>]/report.json` and caches Moose's output per
