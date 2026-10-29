@@ -580,3 +580,9 @@ def test_every_dpv_schema_defines_a_name_as_a_persons_name_not_a_code() -> None:
     for schema in ("dpv_privacy", "dpv_pd", "dpv"):
         records = {r["id"]: r for r in get_schema_config(schema).load_type_records()}
         assert records["dpv-pd:Name"]["definition"].startswith("The name of a person"), schema
+
+
+def test_a_column_of_names_still_retrieves_name() -> None:
+    index = candidate_index(get_schema_config("dpv_privacy"))
+    for query in ("customer names Customer", "surname Rossi", "person name Luca Bianchi"):
+        assert "dpv-pd:Name" in [c["id"] for c in index.top_k(query, 8)], query
