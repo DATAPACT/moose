@@ -148,6 +148,7 @@ above, protecting the applicant; none failed, $0.43.
 | `dpv_privacy` (personal-data spans) | 0.85 | 0.35 | 0.79 | 0.80 |
 | `moose.anonymise`, masked | 0.98 | 0.75 | 0.82 | 0.78 |
 | `moose.anonymise`, every mention found masked | 0.98 | 0.94 | 0.48 | 0.47 |
+| `moose.anonymise`, masked, every name masked (below) | 0.98 | 0.91 | 0.74 | 0.70 |
 
 Mentions found per type: DATETIME 525/526, PERSON 242/243, CODE 82/82, QUANTITY 34/35, LOC
 77/80, ORG 100/105, DEM 64/81, MISC 21/37. The decision, not the search, is where QUASI
@@ -156,6 +157,25 @@ recall is lost; MISC (injuries and other descriptions) is the weak spot of the s
 One case failed at first: on an ordinary paragraph the LLM reasoned until its 40,000-token
 limit and answered nothing. The mention step now splits such a chunk in two and tries each
 half (`moose.ner.MIN_SPLIT_CHARS`), for every two-step schema, not only here.
+
+### Every name masked
+
+The decision left the names of judges, government agents and lawyers unmasked, taking them
+for the international courts and national bodies the rules leave: of the names left, TAB
+masks 259 of 339 in 90 train cases and 64 of 67 in the test cases above. The rules now say
+that a person's name is never NO_MASK, whatever their role. Only the decision was rerun, on
+the same mentions (`tab.py --decide-from`): $0.07 on dev, $0.14 on test.
+
+| | DIRECT recall | QUASI recall | Token precision | Mention precision | Token F1 |
+|---|---|---|---|---|---|
+| dev 15, before | 0.93 | 0.80 | 0.77 | 0.74 | |
+| dev 15, every name masked | 0.93 | 0.91 | 0.76 | 0.73 | 0.82 |
+| test 30, before | 0.98 | 0.75 | 0.82 | 0.78 | 0.805 |
+| test 30, every name masked | 0.98 | 0.91 | 0.74 | 0.70 | 0.819 |
+
+More of what TAB masks is masked, at some cost in precision: masking a name TAB leaves (a
+judge whose name the annotator kept) costs tokens. For anonymisation, missing an identifier
+is the worse error.
 
 ## Step 4 results
 
@@ -184,7 +204,9 @@ log-odds of Laya's probability (`research/tab_eval/fit_mask_calibration.py`, wei
 | category and decision | 0.790 | 0.041 | 0.80 |
 | category, decision and Laya (shipped) | 0.795 | 0.039 | 0.80 |
 
-The confidence is calibrated (ECE 0.039 ≤ 0.10), so results carry `"calibrated": true`. Most
+The confidence is calibrated (ECE 0.039 ≤ 0.10), so results carry `"calibrated": true`.
+With every name masked (above), the same weights on the new test decisions: 0.83 right,
+mean confidence 0.81, ECE 0.045, AUC 0.87; they were not refitted. Most
 of what it knows comes from the category and decision, not from Laya (weight 0.16 on its
 log-odds). Mean confidence and share right on test, per category and decision:
 masked dates 0.93 (95% right) and names 0.92 (98%); masked organisations 0.49 (48%), job

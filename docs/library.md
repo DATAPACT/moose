@@ -118,7 +118,7 @@ for e in result["entities"]:
   an `identifier_type` (DIRECT, QUASI or NO_MASK) and an `entity` number shared by the
   mentions of the same text, which are decided together.
 - It makes 1 LLM call per 1,500 characters to find mentions and 1 per text to decide.
-- On TAB, 30 court cases: 98% of direct and 75% of quasi identifiers masked, with 82% of
+- On TAB, 30 court cases: 98% of direct and 91% of quasi identifiers masked, with 74% of
   masked text rightly masked (`research/tab_eval`, `docs/design/anonymisation.md`).
 - `confidence` is the probability that the decision (mask or not) is right. It needs Laya
   (`"confidence": null` without it) and is calibrated on TAB's court cases (expected
