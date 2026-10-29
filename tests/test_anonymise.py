@@ -77,6 +77,44 @@ async def test_each_entity_is_decided_once_for_all_its_mentions_and_masked_with_
     assert "so that Mr Smith cannot be identified" in decision_prompt and json.dumps(text) in decision_prompt
 
 
+@pytest.mark.asyncio
+async def test_with_laya_each_entity_gets_the_fitted_confidence_of_its_decision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import moose.anonymise as anon
+
+    calibration = tmp_path / "laya_calibration.json"
+    calibration.write_text(json.dumps({
+        "model": "fake", "weights": {"PERSON:mask": 2.0, "ORG:leave": 0.0}, "laya_weight": 1.0, "validated_for": ["text"],
+    }))
+    asked: list[tuple[str, dict]] = []
+
+    class _Laya:
+        async def ask(self, inputs):
+            asked.extend(inputs)
+            return [{"yes": 0.5, "no": 0.5} for _ in inputs]
+
+    async def scorer(model: str) -> _Laya:
+        return _Laya()
+
+    monkeypatch.setattr(anon, "CALIBRATION_PATH", calibration)
+    monkeypatch.setattr(anon, "system1_ready", lambda cal: True)
+    monkeypatch.setattr(anon, "get_scorer", scorer)
+    llm = _ScriptedLLM(
+        {"mentions": [{"text": "Mr Smith", "category": "PERSON"}, {"text": "Home Office", "category": "ORG"},
+                      {"text": "Mr Smith", "category": "PERSON"}]},
+        {"decisions": [{"entity": 0, "identifier_type": "DIRECT"}, {"entity": 1, "identifier_type": "NO_MASK"}]},
+    )
+    result = await anonymise("Mr Smith left the Home Office. Mr Smith", llm, protect="Mr Smith")
+
+    # Laya is asked once per entity, on its first mention; P(yes) 0.5 adds nothing, so the
+    # confidence is the weight of the category and decision: sigmoid(2) and sigmoid(0).
+    assert len(asked) == 2 and "protect Mr Smith" in asked[0][1]["mask"]["instructions"]
+    conf = {(m["text"], m["start"]): (m["confidence"], m["calibrated"]) for m in result["entities"]}
+    assert conf[("Mr Smith", 0)] == conf[("Mr Smith", 31)] == (0.8808, True)
+    assert conf[("Home Office", 18)] == (0.5, True)
+
+
 def test_decisions_must_name_listed_entities_and_known_types() -> None:
     assert _parse_decisions('{"decisions": [{"entity": 1, "identifier_type": "no_mask"}]}', 2) == {1: "NO_MASK"}
     with pytest.raises(ValueError, match="listed entity"):

@@ -1,8 +1,8 @@
 # Design: an anonymisation mode
 
-Status: steps 1-3 implemented: `Annotator.anonymise`, `POST /anonymise`, documented in
-`docs/library.md` and the README, with `"confidence": null` and `"calibrated": false`. Step 4
-(Laya's probability and its calibration) is not.
+Status: implemented: `Annotator.anonymise`, `POST /anonymise`, documented in
+`docs/library.md` and the README. With Laya installed, each decision has a calibrated
+`confidence` (step 4); without it, `"confidence": null`.
 
 ## Why
 
@@ -88,6 +88,8 @@ Steps, each checked before the next:
 2. The masking decision; DIRECT/QUASI recall and token precision on the same cases (~$0.15).
 3. `masked_text`, the API and the docs; unit tests.
 4. Calibration of Laya's verdict on 200 train cases (~$2), then the test split once (~$0.30).
+   Done on 90 train cases ($1.59; train cases are longer than test ones), checked on the
+   cached test run (no cost): see Step 4 results.
 
 ## Step 1 results
 
@@ -154,6 +156,43 @@ recall is lost; MISC (injuries and other descriptions) is the weak spot of the s
 One case failed at first: on an ordinary paragraph the LLM reasoned until its 40,000-token
 limit and answered nothing. The mention step now splits such a chunk in two and tries each
 half (`moose.ner.MIN_SPLIT_CHARS`), for every two-step schema, not only here.
+
+## Step 4 results
+
+Laya is asked, for each entity's first mention (400 characters around it): "Must the mention
+be masked to protect the applicant?" (`moose.anonymise.laya_mask_inputs`). On TAB, with the
+LLM's decisions of the runs above (`research/tab_eval/laya_mask.py`):
+
+| | Train, 90 cases | Test, 30 cases |
+|---|---|---|
+| entities | 6,782 | 1,839 |
+| the LLM's decision right | 0.80 | 0.82 |
+| Laya's P(mask) against TAB, AUC | 0.65 | 0.70 |
+| Laya's probability that the decision is right, mean | 0.53 | 0.56 |
+| the same, ECE | 0.27 | 0.26 |
+
+Laya alone is a weak judge of masking: it was trained on short calls and personal-data
+types, not on re-identification. Telling it the LLM's decision changed little (test AUC
+0.71). So its answer is combined with what is known about the decision: a logistic
+regression, fitted on train, on the entity's category and decision (masked or left) and the
+log-odds of Laya's probability (`research/tab_eval/fit_mask_calibration.py`, weights in
+`src/moose/data/anonymise/laya_calibration.json`). On test:
+
+| Confidence | AUC (right vs wrong) | ECE | Mean |
+|---|---|---|---|
+| Laya alone | 0.685 | 0.263 | 0.56 |
+| category and decision | 0.790 | 0.041 | 0.80 |
+| category, decision and Laya (shipped) | 0.795 | 0.039 | 0.80 |
+
+The confidence is calibrated (ECE 0.039 ≤ 0.10), so results carry `"calibrated": true`. Most
+of what it knows comes from the category and decision, not from Laya (weight 0.16 on its
+log-odds). Mean confidence and share right on test, per category and decision:
+masked dates 0.93 (95% right) and names 0.92 (98%); masked organisations 0.49 (48%), job
+titles and other demographic details 0.39 (57%) and descriptions 0.37 (55%, 11 entities);
+names left unmasked 0.23 (4%: they should have been masked). Those low ones are what to
+review first. Within a group it is coarser: organisations left unmasked get 0.80 and are 95%
+right, places left 0.66 and 84% right. The calibration holds for court cases protecting one person; other texts and
+`protect` values were not checked.
 
 ## Decisions
 

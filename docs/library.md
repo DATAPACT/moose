@@ -105,11 +105,13 @@ print(result["masked_text"])
 # Norwegian Data Protection Authority that her employer had shared her sick-leave records
 # with an insurer.
 for e in result["entities"]:
-    print(e["text"], e["category"], e["identifier_type"])
-# 3 May 2021  DATETIME  QUASI
-# Ms Anna Berg  PERSON  DIRECT
+    print(e["text"], e["category"], e["identifier_type"], e["confidence"])
+# 3 May 2021  DATETIME  QUASI  0.92
+# Ms Anna Berg  PERSON  DIRECT  0.93
+# 52-year-old  DEM  QUASI  0.45
+# nurse  DEM  QUASI  0.39
 # ...
-# Norwegian Data Protection Authority  ORG  NO_MASK
+# Norwegian Data Protection Authority  ORG  NO_MASK  0.73
 ```
 
 - Every mention has a `category` (PERSON, CODE, LOC, ORG, DEM, DATETIME, QUANTITY, MISC),
@@ -118,8 +120,12 @@ for e in result["entities"]:
 - It makes 1 LLM call per 1,500 characters to find mentions and 1 per text to decide.
 - On TAB, 30 court cases: 98% of direct and 75% of quasi identifiers masked, with 82% of
   masked text rightly masked (`research/tab_eval`, `docs/design/anonymisation.md`).
-- Not yet: probabilities (`"confidence": null`, `"calibrated": false`) and languages other
-  than English.
+- `confidence` is the probability that the decision (mask or not) is right. It needs Laya
+  (`"confidence": null` without it) and is calibrated on TAB's court cases (expected
+  calibration error 0.039 on 30 test cases). It comes mostly from the category and the
+  decision, little from Laya: masked dates and names are almost always right; masked job
+  titles, organisations and descriptions are the ones to review.
+- Not yet: languages other than English.
 
 ## Probabilities
 
@@ -144,6 +150,8 @@ The `linker` argument picks who decides:
 | `dpv_privacy` text | 0.075 ✓ | 0.052 ✓ | 0.133 |
 | `dpv_pd` text | 0.067 ✓ | 0.067 ✓ | 0.219 |
 | `dpv` text | 0.254 | 0.238 | 0.176 |
+
+Anonymisation's `confidence` is different: see Anonymisation above.
 
 Tables, column relationships and other schemas have no labelled data yet, so their
 results show `"calibrated": false`.

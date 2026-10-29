@@ -1,0 +1,27 @@
+{
+  "model": "convaiinnovations/laya",
+  "weights": {
+    "CODE:leave": 4.1136,
+    "CODE:mask": 2.5288,
+    "DATETIME:leave": -0.5231,
+    "DATETIME:mask": 2.5711,
+    "DEM:leave": 1.4687,
+    "DEM:mask": -0.4823,
+    "LOC:leave": 0.5697,
+    "LOC:mask": 1.4092,
+    "MISC:leave": 1.4992,
+    "MISC:mask": -0.5819,
+    "ORG:leave": 1.2531,
+    "ORG:mask": 0.1085,
+    "PERSON:leave": -0.8624,
+    "PERSON:mask": 2.1141,
+    "QUANTITY:leave": 0.5247,
+    "QUANTITY:mask": 0.3787
+  },
+  "laya_weight": 0.1615,
+  "validated_for": [
+    "text"
+  ],
+  "fitted_on": "TAB train, 90 random cases (6782 entities, first mentions), protecting the applicant; decisions by openai/gpt-oss-120b. research/tab_eval/fit_mask_calibration.py",
+  "checked_on": "TAB test, 30 random cases (1839 entities): decisions 0.821 right, mean confidence 0.803, ECE 0.039, AUC 0.795."
+}
