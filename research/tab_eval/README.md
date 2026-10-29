@@ -19,6 +19,8 @@ if all its mentions are masked) and token precision.
 PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --split dev --docs 15
 # moose.anonymise (docs/design/anonymisation.md), protecting the applicant
 PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --mode anonymise --split dev --docs 15
+# Only the decision again, on an earlier run's mentions (a few cents)
+PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --mode anonymise --split dev --decide-from runs/anonymise_dev_openai_gpt-oss-120b/raw.jsonl --tag names
 # The confidence of its decisions: Laya's scores on a train and a test run, then the fit
 # (echr_train.json under data/ too; 90 train cases cost $1.59)
 PYTHONPATH=../../src ../.venv-laya/bin/python tab.py --mode anonymise --split train --docs 90 --max-cost 2

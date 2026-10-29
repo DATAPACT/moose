@@ -23,5 +23,5 @@
     "text"
   ],
   "fitted_on": "TAB train, 90 random cases (6782 entities, first mentions), protecting the applicant; decisions by openai/gpt-oss-120b. research/tab_eval/fit_mask_calibration.py",
-  "checked_on": "TAB test, 30 random cases (1839 entities): decisions 0.821 right, mean confidence 0.803, ECE 0.039, AUC 0.795."
+  "checked_on": "TAB test, 30 random cases (1839 entities): decisions 0.821 right, mean confidence 0.803, ECE 0.039, AUC 0.795. With every name masked (the rules since): 0.828 right, mean confidence 0.812, ECE 0.045, AUC 0.866 (weights not refitted)."
 }

@@ -75,6 +75,7 @@ async def test_each_entity_is_decided_once_for_all_its_mentions_and_masked_with_
     decision_prompt = llm.prompts[1]
     assert decision_prompt.count('"text": "Mr Smith"') == 1 and '"mentions": 2' in decision_prompt
     assert "so that Mr Smith cannot be identified" in decision_prompt and json.dumps(text) in decision_prompt
+    assert "A person's name is never NO_MASK" in decision_prompt
 
 
 @pytest.mark.asyncio

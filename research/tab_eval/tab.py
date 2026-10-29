@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from moose import OpenRouterClient
-from moose.anonymise import MASKED, anonymise
+from moose.anonymise import MASKED, anonymise, decide_and_mask
 from moose.config import Settings
 from moose.llm.usage import track_llm_usage
 from moose.ner import run_text_ner
@@ -85,8 +85,14 @@ def type_table(docs: dict[str, dict[str, Any]], raw: dict[str, dict[str, Any]]) 
 
 async def main_async(args: argparse.Namespace) -> None:
     docs = {d["doc_id"]: d for d in json.loads((DATA / f"echr_{args.split}.json").read_text(encoding="utf-8"))}
-    if args.docs_from:
-        chosen = [json.loads(line)["doc_id"] for line in Path(args.docs_from).read_text().splitlines()]
+    # --decide-from: an earlier anonymise run's mentions, decided again (no mention calls).
+    found = {}
+    if args.decide_from:
+        for line in Path(args.decide_from).read_text().splitlines():
+            entry = json.loads(line)
+            found[entry["doc_id"]] = [{k: m[k] for k in ("start", "end", "text", "category")} for m in entry["entities"]]
+    if args.docs_from or args.decide_from:
+        chosen = [json.loads(line)["doc_id"] for line in Path(args.docs_from or args.decide_from).read_text().splitlines()]
     else:
         chosen = sorted(docs)
         random.Random(args.seed).shuffle(chosen)
@@ -104,9 +110,13 @@ async def main_async(args: argparse.Namespace) -> None:
     llm = OpenRouterClient(api_key=_api_key(), model=args.model)
     settings = Settings(MOOSE_MAX_RETRIES=2)
 
-    async def annotate(text: str) -> list[dict[str, Any]]:
+    async def annotate(doc_id: str) -> list[dict[str, Any]]:
+        text = docs[doc_id]["text"]
         if args.mode == "anonymise":  # each mention's category as its type
-            out = await anonymise(text, llm, protect=PROTECT, settings=settings)
+            if doc_id in found:
+                out = await decide_and_mask(text, found[doc_id], llm, protect=PROTECT, settings=settings)
+            else:
+                out = await anonymise(text, llm, protect=PROTECT, settings=settings)
             return [{**m, "type_id": m["category"]} for m in out["entities"]]
         out = await run_text_ner([{"task_id": "t", "text": text}], SCHEMA, llm, settings)
         return out["results"][0]["entities"]
@@ -120,7 +130,7 @@ async def main_async(args: argparse.Namespace) -> None:
                 return
             try:
                 with track_llm_usage(llm.model) as usage:
-                    entities = await annotate(docs[doc_id]["text"])
+                    entities = await annotate(doc_id)
             except Exception as exc:  # noqa: BLE001 - one bad document must not stop the run
                 print(f"  {doc_id} failed: {exc}", flush=True)
                 return
@@ -173,6 +183,7 @@ def main() -> None:
     parser.add_argument("--docs", type=int, default=15, help="random documents of the split")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--docs-from", help="an earlier run's raw.jsonl: annotate the same documents")
+    parser.add_argument("--decide-from", help="an earlier --mode anonymise run's raw.jsonl: decide its mentions again")
     parser.add_argument("--model", default="openai/gpt-oss-120b")
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--max-cost", type=float, default=0.5, help="USD this run may spend on the LLM")
