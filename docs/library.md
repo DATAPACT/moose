@@ -38,7 +38,7 @@ moose = Annotator(OpenRouterClient(api_key=os.environ["OPENROUTER_API_KEY"], mod
 result = moose.annotate_text("Agent: Thanks, Luca Bianchi. Your customer ID is USR 661 204.")
 for e in result["entities"]:
     print(e["text"], e["type_id"], e["confidence"], e["decided_by"])
-# Luca Bianchi  dpv-pd:Identifier  0.72  system1
+# Luca Bianchi  dpv-pd:Name        0.92  system1
 # USR 661 204   dpv-pd:Identifier  0.79  system1
 
 print(moose.last_usage.calls, moose.last_usage.cost_usd)  # LLM calls and cost of that call
